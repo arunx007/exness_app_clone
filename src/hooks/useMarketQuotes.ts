@@ -42,9 +42,13 @@ export function useMarketQuotes(symbolNames: string[]) {
     });
   }, []);
 
+  const isConnectedRef = useRef(false);
+
   useEffect(() => {
     if (symbolNames.length === 0) {
-      marketSocket.disconnect();
+      if (isConnectedRef.current) {
+        marketSocket.setSymbols([]);
+      }
       return;
     }
 
@@ -67,12 +71,20 @@ export function useMarketQuotes(symbolNames: string[]) {
       }
     };
 
-    marketSocket.connect(symbolNames, {
-      onTick: enqueueTick,
-      onSnapshot: (ticks) => ticks.forEach(enqueueTick),
-    });
+    if (!isConnectedRef.current) {
+      isConnectedRef.current = true;
+      marketSocket.connect(symbolNames, {
+        onTick: enqueueTick,
+        onSnapshot: (ticks) => ticks.forEach(enqueueTick),
+      });
+    } else {
+      marketSocket.setSymbols(symbolNames);
+    }
+  }, [symbolsKey, flush]);
 
+  useEffect(() => {
     return () => {
+      isConnectedRef.current = false;
       marketSocket.disconnect();
       if (flushTimer.current) {
         clearTimeout(flushTimer.current);
@@ -80,7 +92,7 @@ export function useMarketQuotes(symbolNames: string[]) {
       }
       pendingUpdates.current.clear();
     };
-  }, [symbolsKey, flush]);
+  }, []);
 
   return quotes;
 }

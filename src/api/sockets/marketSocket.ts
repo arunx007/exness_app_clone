@@ -89,8 +89,12 @@ export class MarketSocketService {
         added.push(symbol);
       }
     }
-    if (added.length > 0) {
-      this.sendCurrentSubscription();
+    if (added.length > 0 && this.socket?.readyState === WebSocket.OPEN) {
+      this.send({
+        type: 'sub_symbols',
+        symbols: added,
+        streams: ['watch'],
+      });
     }
   }
 
@@ -99,10 +103,45 @@ export class MarketSocketService {
     const removed: string[] = [];
     for (const raw of symbols) {
       const symbol = raw.trim();
-      if (symbol && this.symbols.delete(symbol)) removed.push(symbol);
+      if (symbol && this.symbols.delete(symbol)) {
+        removed.push(symbol);
+      }
     }
-    if (removed.length > 0) {
-      this.sendCurrentSubscription();
+    if (removed.length > 0 && this.socket?.readyState === WebSocket.OPEN) {
+      this.send({
+        type: 'unsub_symbols',
+        symbols: removed,
+        streams: ['watch'],
+      });
+    }
+  }
+
+  /** Replace the active subscription with a new set of symbols (e.g. only visible items on screen). */
+  setSymbols(nextSymbols: string[]): void {
+    const nextSet = new Set(nextSymbols.map((s) => s.trim()).filter(Boolean));
+    const toAdd = [...nextSet].filter((s) => !this.symbols.has(s));
+    const toRemove = [...this.symbols].filter((s) => !nextSet.has(s));
+
+    if (toRemove.length > 0) {
+      for (const s of toRemove) this.symbols.delete(s);
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        this.send({
+          type: 'unsub_symbols',
+          symbols: toRemove,
+          streams: ['watch'],
+        });
+      }
+    }
+
+    if (toAdd.length > 0) {
+      for (const s of toAdd) this.symbols.add(s);
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        this.send({
+          type: 'sub_symbols',
+          symbols: toAdd,
+          streams: ['watch'],
+        });
+      }
     }
   }
 

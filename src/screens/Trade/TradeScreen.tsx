@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   TextInput,
   RefreshControl,
+  FlatList,
+  ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -75,10 +77,98 @@ export const TradeScreen: React.FC = () => {
 
   const [positions, setPositions] = useState<Mt5Position[]>([]);
   const [sparklines, setSparklines] = useState<Record<string, number[]>>({});
+  const [visibleSymbols, setVisibleSymbols] = useState<string[]>([]);
 
-  // Subscribed symbol strings for market socket
-  const symbolNames = useMemo(() => catalog.map((s) => s.symbol), [catalog]);
-  const liveQuotes = useMarketQuotes(symbolNames);
+  // Filter instruments based on active tab and search query
+  const filteredSymbols = useMemo(() => {
+    let list = catalog;
+
+    // Filter by category tab
+    if (activeTab === 'Favorites') {
+      const favoriteSymbols = ['BTCUSD', 'XAUUSD', 'EURUSD', 'GBPUSD', 'ETHUSD', 'USDJPY', 'SOLUSD', 'XAGUSD'];
+      list = list.filter((s) => favoriteSymbols.some((fav) => marketSymbolsMatch(s.symbol, fav)));
+    } else if (activeTab === 'Most traded') {
+      const popularSymbols = ['XAUUSD', 'EURUSD', 'BTCUSD', 'GBPUSD', 'USDJPY', 'USOIL', 'ETHUSD'];
+      list = list.filter((s) => popularSymbols.some((pop) => marketSymbolsMatch(s.symbol, pop)));
+    } else if (activeTab === 'Top Movers') {
+      list = [...list].sort((a, b) => {
+        const qA = a.changePercent;
+        const qB = b.changePercent;
+        return Math.abs(qB) - Math.abs(qA);
+      });
+    } else if (activeTab === 'Majors') {
+      const majors = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD'];
+      list = list.filter((s) => majors.some((maj) => marketSymbolsMatch(s.symbol, maj)));
+    } else if (activeTab === 'Crypto') {
+      list = list.filter((s) => inferCategory(s.symbol) === 'Crypto');
+    } else if (activeTab === 'Forex') {
+      list = list.filter((s) => inferCategory(s.symbol) === 'Forex');
+    } else if (activeTab === 'Metals') {
+      list = list.filter((s) => inferCategory(s.symbol) === 'Metals');
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.symbol.toLowerCase().includes(query) ||
+          s.name.toLowerCase().includes(query) ||
+          symbolDisplayName(s.symbol).toLowerCase().includes(query)
+      );
+    }
+
+    // Deduplicate base symbols so suffixed variants don't clutter the same tab
+    const seen = new Set<string>();
+    const deduplicated: CatalogSymbol[] = [];
+    for (const item of list) {
+      const base = item.symbol.toUpperCase().split('.')[0].replace(/[^A-Z0-9]/g, '');
+      if (!seen.has(base)) {
+        seen.add(base);
+        deduplicated.push(item);
+      }
+    }
+
+    return deduplicated;
+  }, [catalog, activeTab, searchQuery]);
+
+  // Viewport-based visibility tracking (ONLY subscribe to symbols visible on screen)
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 15,
+    minimumViewTime: 80,
+  }).current;
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+      const visible = viewableItems
+        .map((v) => (v.item as CatalogSymbol)?.symbol)
+        .filter((s): s is string => typeof s === 'string' && Boolean(s));
+
+      if (visible.length > 0) {
+        setVisibleSymbols(visible);
+      }
+    }
+  ).current;
+
+  // On tab switch or search change, prime visibleSymbols with the visible window
+  useEffect(() => {
+    if (filteredSymbols.length > 0) {
+      setVisibleSymbols(filteredSymbols.slice(0, 7).map((s) => s.symbol));
+    }
+  }, [activeTab, searchQuery, filteredSymbols.length]);
+
+  // Active subscribed symbols: strictly symbols currently in viewport
+  const activeSubscribedSymbols = useMemo(() => {
+    if (visibleSymbols.length > 0) {
+      const valid = visibleSymbols.filter((sym) =>
+        filteredSymbols.some((item) => marketSymbolsMatch(item.symbol, sym))
+      );
+      if (valid.length > 0) return valid;
+    }
+    return filteredSymbols.slice(0, 7).map((s) => s.symbol);
+  }, [visibleSymbols, filteredSymbols]);
+
+  const liveQuotes = useMarketQuotes(activeSubscribedSymbols);
 
   // Reset chart symbol if switching tabs
   useEffect(() => {
@@ -186,59 +276,6 @@ export const TradeScreen: React.FC = () => {
     fetchPositions();
   }, [loadSymbols, fetchPositions]);
 
-  // Filter instruments based on active tab and search query
-  const filteredSymbols = useMemo(() => {
-    let list = catalog;
-
-    // Filter by category tab
-    if (activeTab === 'Favorites') {
-      const favoriteSymbols = ['BTCUSD', 'XAUUSD', 'EURUSD', 'GBPUSD', 'ETHUSD', 'USDJPY', 'SOLUSD', 'XAGUSD'];
-      list = list.filter((s) => favoriteSymbols.some((fav) => marketSymbolsMatch(s.symbol, fav)));
-    } else if (activeTab === 'Most traded') {
-      const popularSymbols = ['XAUUSD', 'EURUSD', 'BTCUSD', 'GBPUSD', 'USDJPY', 'USOIL', 'ETHUSD'];
-      list = list.filter((s) => popularSymbols.some((pop) => marketSymbolsMatch(s.symbol, pop)));
-    } else if (activeTab === 'Top Movers') {
-      list = [...list].sort((a, b) => {
-        const qA = liveQuotes[a.symbol]?.changePercent ?? a.changePercent;
-        const qB = liveQuotes[b.symbol]?.changePercent ?? b.changePercent;
-        return Math.abs(qB) - Math.abs(qA);
-      });
-    } else if (activeTab === 'Majors') {
-      const majors = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD'];
-      list = list.filter((s) => majors.some((maj) => marketSymbolsMatch(s.symbol, maj)));
-    } else if (activeTab === 'Crypto') {
-      list = list.filter((s) => inferCategory(s.symbol) === 'Crypto');
-    } else if (activeTab === 'Forex') {
-      list = list.filter((s) => inferCategory(s.symbol) === 'Forex');
-    } else if (activeTab === 'Metals') {
-      list = list.filter((s) => inferCategory(s.symbol) === 'Metals');
-    }
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.trim().toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.symbol.toLowerCase().includes(query) ||
-          s.name.toLowerCase().includes(query) ||
-          symbolDisplayName(s.symbol).toLowerCase().includes(query)
-      );
-    }
-
-    // Deduplicate base symbols so suffixed variants don't clutter the same tab
-    const seen = new Set<string>();
-    const deduplicated: CatalogSymbol[] = [];
-    for (const item of list) {
-      const base = item.symbol.toUpperCase().split('.')[0].replace(/[^A-Z0-9]/g, '');
-      if (!seen.has(base)) {
-        seen.add(base);
-        deduplicated.push(item);
-      }
-    }
-
-    return deduplicated;
-  }, [catalog, activeTab, liveQuotes, searchQuery]);
-
   // Active positions summary per symbol
   const getSymbolTradeSummary = useCallback(
     (symbol: string) => {
@@ -253,6 +290,113 @@ export const TradeScreen: React.FC = () => {
       };
     },
     [positions]
+  );
+
+  const renderInstrumentCard = useCallback(
+    ({ item }: { item: CatalogSymbol }) => {
+      const live =
+        liveQuotes[item.symbol] ??
+        Object.values(liveQuotes).find((q) => marketSymbolsMatch(q.symbol, item.symbol));
+      const rawPrice = live && live.bid > 0 ? live.bid : item.bid;
+      const formattedPrice = formatPrice(rawPrice, item.digits);
+
+      const changePercent =
+        live?.changePercent !== undefined ? live.changePercent : item.changePercent;
+      const isPositive = changePercent >= 0;
+      const formattedChange = `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%`;
+
+      // Dynamic sparkline from real ticks or fallback
+      const itemSparkline =
+        sparklines[item.symbol] && sparklines[item.symbol].length >= 2
+          ? sparklines[item.symbol]
+          : item.initialSparkline || [rawPrice * 0.999, rawPrice];
+
+      const tradeSummary = getSymbolTradeSummary(item.symbol);
+
+      return (
+        <TouchableOpacity
+          key={item.id || item.symbol}
+          activeOpacity={0.85}
+          style={styles.instrumentCard}
+          onPress={() => setSelectedChartSymbol(item.symbol)}
+        >
+          {/* Top row of card */}
+          <View style={styles.cardMainRow}>
+            {/* Left Column: Dynamic SymbolIcon + Symbol Name + Subtitle */}
+            <View style={styles.cardLeft}>
+              <SymbolIcon symbol={item.symbol} size={34} />
+
+              {/* Symbol & Subtitle */}
+              <View style={styles.symbolInfo}>
+                <View style={styles.symbolHeaderRow}>
+                  <Text style={styles.symbolText}>
+                    {item.symbol.includes('.') ? item.symbol.split('.')[0] : item.symbol}
+                  </Text>
+                  {live && <View style={styles.liveIndicatorDot} />}
+                </View>
+                <Text
+                  style={styles.instrumentSubtitle}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {item.name || symbolDisplayName(item.symbol)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Middle Column: Live Sparkline Chart */}
+            <View style={styles.cardCenter}>
+              <SparklineChart
+                points={itemSparkline}
+                isPositive={isPositive}
+                width={78}
+                height={28}
+              />
+            </View>
+
+            {/* Right Column: Live Price & 24h Change */}
+            <View style={styles.cardRight}>
+              <Text style={styles.priceText}>{formattedPrice}</Text>
+              <View style={styles.changeRow}>
+                <Text
+                  style={[
+                    styles.changeText,
+                    { color: isPositive ? '#2563EB' : '#EF4444' },
+                  ]}
+                >
+                  {isPositive ? '↑' : '↓'} {formattedChange}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Bottom active order banner (if any) */}
+          {tradeSummary && (
+            <View
+              style={[
+                styles.activeOrderBanner,
+                tradeSummary.isLoss ? styles.orderBannerLoss : styles.orderBannerProfit,
+              ]}
+            >
+              <Text style={styles.activeOrderLabel}>
+                Orders {tradeSummary.count}
+              </Text>
+              <Text
+                style={[
+                  styles.activeOrderPnl,
+                  { color: tradeSummary.isLoss ? '#DC2626' : '#16A34A' },
+                ]}
+              >
+                {tradeSummary.isLoss ? 'Loss ' : 'Profit '}
+                {tradeSummary.profit >= 0 ? '+' : ''}
+                {tradeSummary.profit.toFixed(2)} USD
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    },
+    [liveQuotes, sparklines, getSymbolTradeSummary]
   );
 
   return (
@@ -403,9 +547,17 @@ export const TradeScreen: React.FC = () => {
           <Text style={styles.loadingText}>Loading market data...</Text>
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={filteredSymbols}
+          keyExtractor={(item) => item.id || item.symbol}
+          renderItem={renderInstrumentCard}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.instrumentsList}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          initialNumToRender={7}
+          maxToRenderPerBatch={8}
+          windowSize={5}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -414,8 +566,7 @@ export const TradeScreen: React.FC = () => {
               colors={['#F59E0B']}
             />
           }
-        >
-          {filteredSymbols.length === 0 ? (
+          ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="search" size={40} color="#D1D5DB" />
               <Text style={styles.emptyTitle}>No instruments found</Text>
@@ -423,112 +574,8 @@ export const TradeScreen: React.FC = () => {
                 {searchQuery ? `No results for "${searchQuery}"` : 'No instruments in this category'}
               </Text>
             </View>
-          ) : (
-            filteredSymbols.map((item) => {
-              const live = liveQuotes[item.symbol] ?? Object.values(liveQuotes).find((q) => marketSymbolsMatch(q.symbol, item.symbol));
-              const rawPrice = (live && live.bid > 0) ? live.bid : item.bid;
-              const formattedPrice = formatPrice(rawPrice, item.digits);
-
-              const changePercent = live?.changePercent !== undefined
-                ? live.changePercent
-                : item.changePercent;
-              const isPositive = changePercent >= 0;
-              const formattedChange = `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%`;
-
-              // Dynamic sparkline from real ticks or fallback
-              const itemSparkline = sparklines[item.symbol] && sparklines[item.symbol].length >= 2
-                ? sparklines[item.symbol]
-                : item.initialSparkline || [rawPrice * 0.999, rawPrice];
-
-              const tradeSummary = getSymbolTradeSummary(item.symbol);
-
-              return (
-                <TouchableOpacity
-                  key={item.id || item.symbol}
-                  activeOpacity={0.85}
-                  style={styles.instrumentCard}
-                  onPress={() => setSelectedChartSymbol(item.symbol)}
-                >
-                  {/* Top row of card */}
-                  <View style={styles.cardMainRow}>
-                    {/* Left Column: Dynamic SymbolIcon + Symbol Name + Subtitle */}
-                    <View style={styles.cardLeft}>
-                      <SymbolIcon symbol={item.symbol} size={34} />
-
-                      {/* Symbol & Subtitle */}
-                      <View style={styles.symbolInfo}>
-                        <View style={styles.symbolHeaderRow}>
-                          <Text style={styles.symbolText}>
-                            {item.symbol.includes('.') ? item.symbol.split('.')[0] : item.symbol}
-                          </Text>
-                          {live && (
-                            <View style={styles.liveIndicatorDot} />
-                          )}
-                        </View>
-                        <Text
-                          style={styles.instrumentSubtitle}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {item.name || symbolDisplayName(item.symbol)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Middle Column: Live Sparkline Chart */}
-                    <View style={styles.cardCenter}>
-                      <SparklineChart
-                        points={itemSparkline}
-                        isPositive={isPositive}
-                        width={78}
-                        height={28}
-                      />
-                    </View>
-
-                    {/* Right Column: Live Price & 24h Change */}
-                    <View style={styles.cardRight}>
-                      <Text style={styles.priceText}>{formattedPrice}</Text>
-                      <View style={styles.changeRow}>
-                        <Text
-                          style={[
-                            styles.changeText,
-                            { color: isPositive ? '#2563EB' : '#EF4444' },
-                          ]}
-                        >
-                          {isPositive ? '↑' : '↓'} {formattedChange}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Bottom active order banner (if any) */}
-                  {tradeSummary && (
-                    <View
-                      style={[
-                        styles.activeOrderBanner,
-                        tradeSummary.isLoss ? styles.orderBannerLoss : styles.orderBannerProfit,
-                      ]}
-                    >
-                      <Text style={styles.activeOrderLabel}>
-                        Orders {tradeSummary.count}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.activeOrderPnl,
-                          { color: tradeSummary.isLoss ? '#DC2626' : '#16A34A' },
-                        ]}
-                      >
-                        {tradeSummary.isLoss ? 'Loss ' : 'Profit '}
-                        {tradeSummary.profit >= 0 ? '+' : ''}
-                        {tradeSummary.profit.toFixed(2)} USD
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })
-          )}
-        </ScrollView>
+          }
+        />
       )}
 
       {/* Switch Account Modal */}
