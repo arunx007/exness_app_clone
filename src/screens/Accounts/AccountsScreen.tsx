@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,7 @@ import {
   AccountItem,
 } from '../../components/modals';
 import { useAccount } from '../../context/AccountContext';
+import { useTradingData } from '../../context/TradingDataContext';
 import { ChartScreen } from '../Chart/ChartScreen';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -94,6 +95,17 @@ export const AccountsScreen: React.FC = () => {
   const [selectedClosedOrder, setSelectedClosedOrder] = useState<ClosedOrder | null>(null);
 
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
+  const {
+    profile,
+    positions,
+    orders,
+    history,
+    isLoading: isTradingLoading,
+    refresh: refreshTrading,
+    closePosition,
+    cancelPendingOrder,
+  } = useTradingData();
+
   const isFocused = useIsFocused();
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
@@ -141,6 +153,77 @@ export const AccountsScreen: React.FC = () => {
       isProfit: false,
     },
   ]);
+
+  const displayBalance = useMemo(() => {
+    if (profile?.balance !== undefined && Number.isFinite(profile.balance)) {
+      return Number(profile.balance).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    return activeAccount.balance;
+  }, [profile?.balance, activeAccount.balance]);
+
+  const liveOpenOrders: PositionOrder[] = useMemo(() => {
+    if (positions.length > 0) {
+      return positions.map((p) => {
+        const pnl = p.profit;
+        const isProfit = pnl >= 0;
+        return {
+          id: String(p.ticket),
+          symbol: p.symbol,
+          type: p.type === 'BUY' ? 'Buy' : 'Sell',
+          lot: p.volume,
+          openPrice: p.openPrice.toFixed(2),
+          currentPrice: p.currentPrice.toFixed(2),
+          pnl: `${isProfit ? '+' : ''}${pnl.toFixed(2)}`,
+          isProfit,
+        };
+      });
+    }
+    return [];
+  }, [positions]);
+
+  const livePendingOrders = useMemo(() => {
+    return orders.map((o) => ({
+      id: String(o.ticket),
+      ticket: o.ticket,
+      symbol: o.symbol,
+      type: o.type,
+      volume: o.volume,
+      price: o.price.toFixed(2),
+      openTime: o.openTime,
+    }));
+  }, [orders]);
+
+  const liveClosedOrders: ClosedOrder[] = useMemo(() => {
+    if (history.length > 0) {
+      return history.map((h) => {
+        const isProfit = h.profit >= 0;
+        return {
+          id: String(h.ticket),
+          symbol: h.symbol,
+          type: h.type === 'BUY' ? 'Buy' : 'Sell',
+          lot: h.volume,
+          openPrice: h.openPrice.toFixed(2),
+          closePrice: h.closePrice.toFixed(2),
+          openTime: h.time ? new Date(h.time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—',
+          closeTime: h.time ? new Date(h.time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—',
+          closedBy: h.action || 'User',
+          swap: `${(h.swap ?? 0).toFixed(2)} USD`,
+          commission: `${(h.commission ?? 0).toFixed(2)} USD`,
+          stopLoss: '—',
+          takeProfit: '—',
+          pnl: `${isProfit ? '+' : ''}${h.profit.toFixed(2)}`,
+          isProfit,
+        };
+      });
+    }
+    return [];
+  }, [history]);
+
+  const currentOpenOrders = liveOpenOrders.length > 0 ? liveOpenOrders : openOrders;
+  const currentClosedOrders = liveClosedOrders.length > 0 ? liveClosedOrders : closedOrders;
 
   if (showAccountDetails) {
     return <AccountDetailsModal onClose={() => setShowAccountDetails(false)} />;
@@ -255,7 +338,7 @@ export const AccountsScreen: React.FC = () => {
 
             {/* Big Balance */}
             <Text style={styles.balanceText}>
-              {activeAccount.balance} {activeAccount.currency}
+              {displayBalance} {activeAccount.currency}
             </Text>
 
             {/* Circular Quick Action Buttons (Trade, Deposit, Withdraw) */}
@@ -308,9 +391,9 @@ export const AccountsScreen: React.FC = () => {
                   >
                     Open
                   </Text>
-                  {openOrders.length > 0 && (
+                  {currentOpenOrders.length > 0 && (
                     <View style={styles.tabBadge}>
-                      <Text style={styles.tabBadgeText}>{openOrders.length}</Text>
+                      <Text style={styles.tabBadgeText}>{currentOpenOrders.length}</Text>
                     </View>
                   )}
                 </View>
@@ -320,14 +403,21 @@ export const AccountsScreen: React.FC = () => {
                 onPress={() => setActiveTab('Pending')}
                 style={[styles.tabButton, activeTab === 'Pending' && styles.tabButtonActive]}
               >
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'Pending' ? styles.tabTextActive : styles.tabTextInactive,
-                  ]}
-                >
-                  Pending
-                </Text>
+                <View style={styles.tabButtonInner}>
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      activeTab === 'Pending' ? styles.tabTextActive : styles.tabTextInactive,
+                    ]}
+                  >
+                    Pending
+                  </Text>
+                  {livePendingOrders.length > 0 && (
+                    <View style={styles.tabBadge}>
+                      <Text style={styles.tabBadgeText}>{livePendingOrders.length}</Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -355,52 +445,164 @@ export const AccountsScreen: React.FC = () => {
 
         {/* ORDERS CONTENT & NEXT TRADES CAROUSEL */}
         <View style={styles.ordersContent}>
-          {activeTab === 'Open' && openOrders.length > 0 ? (
-            <View>
-              {/* Total P/L Row */}
-              <View style={styles.totalPnlRow}>
-                <Text style={styles.totalPnlLabel}>Total P/L</Text>
-                <Text
-                  style={[
-                    styles.totalPnlValue,
-                    {
-                      color:
-                        openOrders.reduce((sum, ord) => sum + parseFloat(ord.pnl), 0) >= 0
-                          ? '#10B981'
-                          : '#EF4444',
-                    },
-                  ]}
-                >
-                  {openOrders
-                    .reduce((sum, ord) => sum + parseFloat(ord.pnl), 0)
-                    .toFixed(2)}{' '}
-                  USD
+          {activeTab === 'Open' ? (
+            currentOpenOrders.length > 0 ? (
+              <View>
+                {/* Total P/L Row */}
+                <View style={styles.totalPnlRow}>
+                  <Text style={styles.totalPnlLabel}>Total P/L</Text>
+                  <Text
+                    style={[
+                      styles.totalPnlValue,
+                      {
+                        color:
+                          currentOpenOrders.reduce((sum, ord) => sum + parseFloat(ord.pnl), 0) >= 0
+                            ? '#10B981'
+                            : '#EF4444',
+                      },
+                    ]}
+                  >
+                    {currentOpenOrders
+                      .reduce((sum, ord) => sum + parseFloat(ord.pnl), 0)
+                      .toFixed(2)}{' '}
+                    USD
+                  </Text>
+                </View>
+
+                {/* Order Cards */}
+                {currentOpenOrders.map((order) => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    onPress={() => setModifyingOrder(order)}
+                    onModify={() => setModifyingOrder(order)}
+                    onClose={() => {
+                      setClosingOrder(order);
+                    }}
+                  />
+                ))}
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.noOrdersText}>
+                  No open orders. Find your next trade:
                 </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalInstrumentsList}
+                >
+                  {QUICK_INSTRUMENTS.map((item, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      activeOpacity={0.8}
+                      style={styles.instrumentCard}
+                      onPress={() => {
+                        setSelectedChartSymbol(item.symbol);
+                        setShowChartModal(true);
+                      }}
+                    >
+                      <Text style={styles.instrumentSymbol}>{item.symbol}</Text>
+                      <View style={styles.instrumentIconRow}>
+                        {item.symbol === 'XAU/USD' && (
+                          <View style={styles.doubleBadgeRow}>
+                            <View style={[styles.miniCircle, { backgroundColor: '#F59E0B' }]}>
+                              <Ionicons name="cube" size={14} color="#FFFFFF" />
+                            </View>
+                            <View style={[styles.miniCircle, { backgroundColor: '#3B82F6', marginLeft: -6 }]}>
+                              <Ionicons name="flag" size={12} color="#FFFFFF" />
+                            </View>
+                          </View>
+                        )}
+                        {item.symbol === 'BTC' && (
+                          <View style={[styles.miniCircle, { backgroundColor: '#F7931A' }]}>
+                            <Ionicons name="logo-bitcoin" size={16} color="#FFFFFF" />
+                          </View>
+                        )}
+                        {item.symbol === 'USOIL' && (
+                          <View style={[styles.miniCircle, { backgroundColor: '#111827' }]}>
+                            <Ionicons name="water" size={16} color="#FFFFFF" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.instrumentPrice}>{item.price}</Text>
+                      <View
+                        style={[
+                          styles.changePill,
+                          {
+                            backgroundColor: item.isPositive ? '#EFF6FF' : '#FEF2F2',
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={item.isPositive ? 'arrow-up' : 'arrow-down'}
+                          size={12}
+                          color={item.isPositive ? '#2563EB' : '#DC2626'}
+                          style={{ marginRight: 2 }}
+                        />
+                        <Text
+                          style={[
+                            styles.changePillText,
+                            { color: item.isPositive ? '#2563EB' : '#DC2626' },
+                          ]}
+                        >
+                          {item.change}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
               </View>
+            )
+          ) : activeTab === 'Pending' ? (
+            livePendingOrders.length > 0 ? (
+              <View style={{ paddingHorizontal: 16 }}>
+                {livePendingOrders.map((ord) => (
+                  <View key={ord.id} style={styles.pendingCard}>
+                    <View style={styles.pendingLeftRow}>
+                      <View style={styles.cryptoIcon}>
+                        <Ionicons name="time-outline" size={20} color="#FFFFFF" />
+                      </View>
+                      <View style={{ marginLeft: 12 }}>
+                        <Text style={styles.closedSymbol}>{ord.symbol}</Text>
+                        <Text style={styles.closedOrderTypeLot}>
+                          <Text style={styles.buyText}>{ord.type.replace('_', ' ')} {ord.volume} lot</Text> at {ord.price}
+                        </Text>
+                      </View>
+                    </View>
 
-              {/* Order Cards */}
-              {openOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onPress={() => setModifyingOrder(order)}
-                  onModify={() => setModifyingOrder(order)}
-                  onClose={() => {
-                    setClosingOrder(order);
-                  }}
-                />
-              ))}
-            </View>
-          ) : activeTab === 'Closed' ? (
+                    <TouchableOpacity
+                      style={styles.cancelPendingBtn}
+                      activeOpacity={0.7}
+                      onPress={() => cancelPendingOrder(ord.ticket)}
+                    >
+                      <Text style={styles.cancelPendingText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyPendingContainer}>
+                <Ionicons name="hourglass-outline" size={40} color="#9CA3AF" style={{ marginBottom: 12 }} />
+                <Text style={styles.noOrdersText}>No pending orders currently active.</Text>
+              </View>
+            )
+          ) : (
             <View>
-              {/* Today, 25 September Header & Day P/L */}
-              <View style={styles.totalPnlRow}>
-                <Text style={styles.closedDateLabel}>Today, 25 September</Text>
-                <Text style={styles.closedPnlValue}>-1.21 USD</Text>
-              </View>
+              {/* Closed Orders */}
+              {currentClosedOrders.length > 0 && (
+                <View style={styles.totalPnlRow}>
+                  <Text style={styles.closedDateLabel}>Closed Orders</Text>
+                  <Text style={styles.closedPnlValue}>
+                    {currentClosedOrders
+                      .reduce((sum, ord) => sum + parseFloat(ord.pnl), 0)
+                      .toFixed(2)}{' '}
+                    USD
+                  </Text>
+                </View>
+              )}
 
-              {/* Closed Order Cards */}
-              {closedOrders.map((order) => (
+              {currentClosedOrders.map((order) => (
                 <TouchableOpacity
                   key={order.id}
                   activeOpacity={0.8}
@@ -426,104 +628,31 @@ export const AccountsScreen: React.FC = () => {
                 </TouchableOpacity>
               ))}
 
-              {/* Date Range Info Footer */}
               <View style={styles.closedRangeContainer}>
                 <Text style={styles.closedRangeText}>
-                  Showing closed orders for the last 30 days:{'\n'}27/08/2026 - 25/09/2026
+                  Showing closed orders for the last 30 days
                 </Text>
               </View>
             </View>
-          ) : (
-            <View>
-              {/* Subtitle */}
-              <Text style={styles.noOrdersText}>
-                No open orders. Find your next trade:
-              </Text>
-
-              {/* Horizontal Instrument Cards */}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalInstrumentsList}
-              >
-                {QUICK_INSTRUMENTS.map((item, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    activeOpacity={0.8}
-                    style={styles.instrumentCard}
-                    onPress={() => {
-                      setSelectedChartSymbol(item.symbol);
-                      setShowChartModal(true);
-                    }}
-                  >
-                    {/* Symbol name */}
-                    <Text style={styles.instrumentSymbol}>{item.symbol}</Text>
-
-                    {/* Instrument Icon representation */}
-                    <View style={styles.instrumentIconRow}>
-                      {item.symbol === 'XAU/USD' && (
-                        <View style={styles.doubleBadgeRow}>
-                          <View style={[styles.miniCircle, { backgroundColor: '#F59E0B' }]}>
-                            <Ionicons name="cube" size={14} color="#FFFFFF" />
-                          </View>
-                          <View style={[styles.miniCircle, { backgroundColor: '#3B82F6', marginLeft: -6 }]}>
-                            <Ionicons name="flag" size={12} color="#FFFFFF" />
-                          </View>
-                        </View>
-                      )}
-                      {item.symbol === 'BTC' && (
-                        <View style={[styles.miniCircle, { backgroundColor: '#F7931A' }]}>
-                          <Ionicons name="logo-bitcoin" size={16} color="#FFFFFF" />
-                        </View>
-                      )}
-                      {item.symbol === 'USOIL' && (
-                        <View style={[styles.miniCircle, { backgroundColor: '#111827' }]}>
-                          <Ionicons name="water" size={16} color="#FFFFFF" />
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Price */}
-                    <Text style={styles.instrumentPrice}>{item.price}</Text>
-
-                    {/* Percentage change pill */}
-                    <View
-                      style={[
-                        styles.changePill,
-                        {
-                          backgroundColor: item.isPositive ? '#EFF6FF' : '#FEF2F2',
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={item.isPositive ? 'arrow-up' : 'arrow-down'}
-                        size={12}
-                        color={item.isPositive ? '#2563EB' : '#DC2626'}
-                        style={{ marginRight: 2 }}
-                      />
-                      <Text
-                        style={[
-                          styles.changePillText,
-                          { color: item.isPositive ? '#2563EB' : '#DC2626' },
-                        ]}
-                      >
-                        {item.change}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
           )}
         </View>
+
       </ScrollView>
 
       {/* Close Position Confirmation Bottom Sheet Modal */}
       <ClosePositionModal
         visible={closingOrder !== null}
         order={closingOrder}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (closingOrder) {
+            const ticket = Number(closingOrder.id);
+            if (Number.isFinite(ticket) && ticket > 0) {
+              try {
+                await closePosition(ticket, closingOrder.lot, closingOrder.symbol);
+              } catch (e) {
+                console.warn('Failed to close position via MT5:', e);
+              }
+            }
             setOpenOrders((prev) => prev.filter((o) => o.id !== closingOrder.id));
             setClosingOrder(null);
           }
@@ -1016,5 +1145,43 @@ const styles = StyleSheet.create({
   changePillText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  pendingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  pendingLeftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  cancelPendingBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 6,
+  },
+  cancelPendingText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  emptyPendingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
   },
 });
