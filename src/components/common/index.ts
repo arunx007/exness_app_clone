@@ -6,3 +6,5 @@ export * from './KeyboardWrapper';
 export * from './ExnessLogo';
 export * from './GoogleLogo';
 export * from './TabIcons';
+export * from './SymbolIcon';
+export * from './SparklineChart';

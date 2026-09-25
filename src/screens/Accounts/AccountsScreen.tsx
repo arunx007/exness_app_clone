@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { AccountDetailsModal } from './AccountDetailsModal';
 import { OrderCard, PositionOrder } from '../../components/cards/OrderCard';
+import { SymbolIcon } from '../../components/common/SymbolIcon';
 import {
   ClosePositionModal,
   ModifyOrderModal,
@@ -122,26 +123,15 @@ export const AccountsScreen: React.FC = () => {
     }
   }, [isFocused]);
 
-  const [openOrders, setOpenOrders] = useState<PositionOrder[]>([
-    {
-      id: 'ord-btc-1',
-      symbol: 'BTC',
-      type: 'Buy',
-      lot: 0.01,
-      openPrice: '97054.72',
-      currentPrice: '97726.11',
-      pnl: '-2.29',
-      isProfit: false,
-    },
-  ]);
+  const [openOrders, setOpenOrders] = useState<PositionOrder[]>([]);
   const [closedOrders, setClosedOrders] = useState<ClosedOrder[]>([
     {
       id: 'cls-7730675',
-      symbol: 'BTC',
+      symbol: 'XAUUSD',
       type: 'Buy',
       lot: 0.01,
-      openPrice: '83954.32',
-      closePrice: '83833.43',
+      openPrice: '2645.32',
+      closePrice: '2652.18',
       openTime: '25 Sept 2026 22:45:25',
       closeTime: '25 Sept 2026 22:55:38',
       closedBy: 'User',
@@ -149,8 +139,8 @@ export const AccountsScreen: React.FC = () => {
       commission: '0.00 USD',
       stopLoss: '—',
       takeProfit: '—',
-      pnl: '-1.21',
-      isProfit: false,
+      pnl: '+6.86',
+      isProfit: true,
     },
   ]);
 
@@ -222,7 +212,7 @@ export const AccountsScreen: React.FC = () => {
     return [];
   }, [history]);
 
-  const currentOpenOrders = liveOpenOrders.length > 0 ? liveOpenOrders : openOrders;
+  const currentOpenOrders = liveOpenOrders;
   const currentClosedOrders = liveClosedOrders.length > 0 ? liveClosedOrders : closedOrders;
 
   if (showAccountDetails) {
@@ -504,26 +494,7 @@ export const AccountsScreen: React.FC = () => {
                     >
                       <Text style={styles.instrumentSymbol}>{item.symbol}</Text>
                       <View style={styles.instrumentIconRow}>
-                        {item.symbol === 'XAU/USD' && (
-                          <View style={styles.doubleBadgeRow}>
-                            <View style={[styles.miniCircle, { backgroundColor: '#F59E0B' }]}>
-                              <Ionicons name="cube" size={14} color="#FFFFFF" />
-                            </View>
-                            <View style={[styles.miniCircle, { backgroundColor: '#3B82F6', marginLeft: -6 }]}>
-                              <Ionicons name="flag" size={12} color="#FFFFFF" />
-                            </View>
-                          </View>
-                        )}
-                        {item.symbol === 'BTC' && (
-                          <View style={[styles.miniCircle, { backgroundColor: '#F7931A' }]}>
-                            <Ionicons name="logo-bitcoin" size={16} color="#FFFFFF" />
-                          </View>
-                        )}
-                        {item.symbol === 'USOIL' && (
-                          <View style={[styles.miniCircle, { backgroundColor: '#111827' }]}>
-                            <Ionicons name="water" size={16} color="#FFFFFF" />
-                          </View>
-                        )}
+                        <SymbolIcon symbol={item.symbol} size={28} />
                       </View>
                       <Text style={styles.instrumentPrice}>{item.price}</Text>
                       <View
@@ -560,8 +531,8 @@ export const AccountsScreen: React.FC = () => {
                 {livePendingOrders.map((ord) => (
                   <View key={ord.id} style={styles.pendingCard}>
                     <View style={styles.pendingLeftRow}>
-                      <View style={styles.cryptoIcon}>
-                        <Ionicons name="time-outline" size={20} color="#FFFFFF" />
+                      <View style={styles.symbolIconWrapper}>
+                        <SymbolIcon symbol={ord.symbol} size={34} />
                       </View>
                       <View style={{ marginLeft: 12 }}>
                         <Text style={styles.closedSymbol}>{ord.symbol}</Text>
@@ -610,10 +581,10 @@ export const AccountsScreen: React.FC = () => {
                   style={styles.closedCard}
                 >
                   <View style={styles.closedLeftRow}>
-                    <View style={styles.cryptoIcon}>
-                      <Ionicons name="logo-bitcoin" size={20} color="#FFFFFF" />
+                    <View style={styles.symbolIconWrapper}>
+                      <SymbolIcon symbol={order.symbol} size={34} />
                     </View>
-                    <View>
+                    <View style={{ marginLeft: 12 }}>
                       <Text style={styles.closedSymbol}>{order.symbol}</Text>
                       <Text style={styles.closedOrderTypeLot}>
                         <Text style={styles.buyText}>{order.type} {order.lot} lot</Text> at {order.openPrice}
@@ -695,7 +666,10 @@ export const AccountsScreen: React.FC = () => {
         visible={showSwitchAccount}
         accounts={accounts}
         activeAccountId={activeAccount.id}
-        onSelectAccount={(account) => setActiveAccount(account)}
+        onSelectAccount={(account) => {
+          setActiveAccount(account);
+          setShowSwitchAccount(false);
+        }}
         onOpenNewAccount={() => setShowOpenAccount(true)}
         onClose={() => setShowSwitchAccount(false)}
       />
@@ -1029,14 +1003,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  cryptoIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#F7931A',
+  symbolIconWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   buyText: {
     color: '#2563EB',

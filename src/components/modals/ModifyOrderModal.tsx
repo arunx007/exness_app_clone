@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SymbolIcon } from '../common/SymbolIcon';
 import { PositionOrder } from '../cards/OrderCard';
 
 interface ModifyOrderModalProps {
@@ -91,10 +92,10 @@ export const ModifyOrderModal: React.FC<ModifyOrderModalProps> = ({
             {/* Order Summary Row */}
             <View style={styles.orderSummaryRow}>
               <View style={styles.orderLeft}>
-                <View style={styles.cryptoIcon}>
-                  <Ionicons name="logo-bitcoin" size={20} color="#FFFFFF" />
+                <View style={styles.symbolIconWrapper}>
+                  <SymbolIcon symbol={order.symbol} size={36} />
                 </View>
-                <View>
+                <View style={{ marginLeft: 10 }}>
                   <Text style={styles.orderSymbol}>{order.symbol}</Text>
                   <Text style={styles.orderTypeLot}>
                     <Text style={styles.buyText}>{order.type} {order.lot} lot</Text> at {order.openPrice}
@@ -454,14 +455,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  cryptoIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#F7931A',
+  symbolIconWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
   },
   orderSymbol: {
     fontSize: 16,

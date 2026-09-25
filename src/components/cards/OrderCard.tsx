@@ -8,6 +8,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SymbolIcon } from '../common/SymbolIcon';
 
 export interface PositionOrder {
   id: string;
@@ -122,11 +123,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({
           onPress={onPress}
           style={styles.cardInner}
         >
-          {/* Left Side: Bitcoin/Symbol Icon + Name + Buy lot text */}
+          {/* Left Side: Dynamic Symbol Icon + Name + Buy lot text */}
           <View style={styles.leftRow}>
-            {/* Orange Bitcoin circle */}
-            <View style={styles.symbolIconCircle}>
-              <Ionicons name="logo-bitcoin" size={22} color="#FFFFFF" />
+            <View style={styles.symbolIconWrapper}>
+              <SymbolIcon symbol={order.symbol} size={36} />
             </View>
 
             <View style={styles.symbolInfo}>
@@ -214,14 +214,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  symbolIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#F7931A', // Bitcoin orange
+  symbolIconWrapper: {
+    marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   symbolInfo: {
     justifyContent: 'center',
