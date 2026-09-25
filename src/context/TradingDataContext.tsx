@@ -80,7 +80,13 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // When MT5 token changes (account switched or logged in), reload everything!
   useEffect(() => {
     fetchTradingData();
-    const unsub = mt5Session.subscribe(() => {
+    const unsub = mt5Session.subscribe((tokens) => {
+      if (tokens.accessToken) {
+        setPositions([]);
+        setOrders([]);
+        setHistory([]);
+        setIsLoading(true);
+      }
       fetchTradingData();
     });
     return () => unsub();

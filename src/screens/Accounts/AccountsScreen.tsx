@@ -9,6 +9,7 @@ import {
   Dimensions,
   Animated,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -27,33 +28,14 @@ import {
   OpenAccountModal,
   VerifyContactDetailsModal,
   AccountItem,
+  AccountSwitchOverlay,
+  Mt5PasswordLoginModal,
 } from '../../components/modals';
 import { useAccount } from '../../context/AccountContext';
 import { useTradingData } from '../../context/TradingDataContext';
 import { ChartScreen } from '../Chart/ChartScreen';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const INITIAL_ACCOUNTS: AccountItem[] = [
-  {
-    id: 'demo-15000113413',
-    accountNumber: '15000113413',
-    type: 'Demo',
-    server: 'Exness',
-    plan: 'Standard',
-    balance: '9,996.50',
-    currency: 'USD',
-  },
-  {
-    id: 'real-14000102647',
-    accountNumber: '14000102647',
-    type: 'Real',
-    server: 'Exness',
-    plan: 'Standard',
-    balance: '0.00',
-    currency: 'USD',
-  },
-];
 
 interface QuickInstrument {
   symbol: string;
@@ -95,7 +77,24 @@ export const AccountsScreen: React.FC = () => {
   const [modifyingOrder, setModifyingOrder] = useState<PositionOrder | null>(null);
   const [selectedClosedOrder, setSelectedClosedOrder] = useState<ClosedOrder | null>(null);
 
-  const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
+  const {
+    accounts,
+    activeAccount,
+    isLoadingAccounts,
+    switchState,
+    setActiveAccount,
+    completeSwitch,
+    addAccount,
+  } = useAccount();
+  const [loginAccountForPassword, setLoginAccountForPassword] = useState<AccountItem | null>(null);
+
+  const handleSelectAccount = async (account: AccountItem) => {
+    setShowSwitchAccount(false);
+    const result = await setActiveAccount(account);
+    if (!result.success) {
+      setLoginAccountForPassword(account);
+    }
+  };
   const {
     profile,
     positions,
@@ -123,27 +122,6 @@ export const AccountsScreen: React.FC = () => {
     }
   }, [isFocused]);
 
-  const [openOrders, setOpenOrders] = useState<PositionOrder[]>([]);
-  const [closedOrders, setClosedOrders] = useState<ClosedOrder[]>([
-    {
-      id: 'cls-7730675',
-      symbol: 'XAUUSD',
-      type: 'Buy',
-      lot: 0.01,
-      openPrice: '2645.32',
-      closePrice: '2652.18',
-      openTime: '25 Sept 2026 22:45:25',
-      closeTime: '25 Sept 2026 22:55:38',
-      closedBy: 'User',
-      swap: '0.00 USD',
-      commission: '0.00 USD',
-      stopLoss: '—',
-      takeProfit: '—',
-      pnl: '+6.86',
-      isProfit: true,
-    },
-  ]);
-
   const displayBalance = useMemo(() => {
     if (profile?.balance !== undefined && Number.isFinite(profile.balance)) {
       return Number(profile.balance).toLocaleString('en-US', {
@@ -151,8 +129,8 @@ export const AccountsScreen: React.FC = () => {
         maximumFractionDigits: 2,
       });
     }
-    return activeAccount.balance;
-  }, [profile?.balance, activeAccount.balance]);
+    return activeAccount?.balance ?? '0.00';
+  }, [profile?.balance, activeAccount?.balance]);
 
   const liveOpenOrders: PositionOrder[] = useMemo(() => {
     if (positions.length > 0) {
@@ -213,7 +191,7 @@ export const AccountsScreen: React.FC = () => {
   }, [history]);
 
   const currentOpenOrders = liveOpenOrders;
-  const currentClosedOrders = liveClosedOrders.length > 0 ? liveClosedOrders : closedOrders;
+  const currentClosedOrders = liveClosedOrders;
 
   if (showAccountDetails) {
     return <AccountDetailsModal onClose={() => setShowAccountDetails(false)} />;
@@ -287,49 +265,60 @@ export const AccountsScreen: React.FC = () => {
 
           {/* White Account Card */}
           <View style={styles.accountCard}>
-            {/* Account meta & settings gear */}
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setShowAccountDetails(true)}
-              style={styles.accountCardHeader}
-            >
-              <Text style={styles.accountNumberText}>
-                {activeAccount.plan} # {activeAccount.accountNumber}
-              </Text>
-              <View style={styles.gearBtn}>
-                <Ionicons name="settings-sharp" size={17} color="#4B5563" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Chips (Demo/Real, Exness, Standard) */}
-            <View style={styles.chipsRow}>
-              <View
-                style={[
-                  styles.chipPill,
-                  activeAccount.type === 'Demo' ? styles.demoChipPill : styles.realChipPill,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    activeAccount.type === 'Demo' ? styles.demoChipText : styles.realChipText,
-                  ]}
+            {activeAccount ? (
+              <>
+                {/* Account meta & settings gear */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setShowAccountDetails(true)}
+                  style={styles.accountCardHeader}
                 >
-                  {activeAccount.type}
+                  <Text style={styles.accountNumberText}>
+                    {activeAccount.plan} # {activeAccount.accountNumber}
+                  </Text>
+                  <View style={styles.gearBtn}>
+                    <Ionicons name="settings-sharp" size={17} color="#4B5563" />
+                  </View>
+                </TouchableOpacity>
+
+                {/* Chips (Demo/Real, Exness, Standard) */}
+                <View style={styles.chipsRow}>
+                  <View
+                    style={[
+                      styles.chipPill,
+                      activeAccount.type === 'Demo' ? styles.demoChipPill : styles.realChipPill,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        activeAccount.type === 'Demo' ? styles.demoChipText : styles.realChipText,
+                      ]}
+                    >
+                      {activeAccount.type}
+                    </Text>
+                  </View>
+                  <View style={styles.chipPill}>
+                    <Text style={styles.chipText}>{activeAccount.server}</Text>
+                  </View>
+                  <View style={styles.chipPill}>
+                    <Text style={styles.chipText}>{activeAccount.plan}</Text>
+                  </View>
+                </View>
+
+                {/* Big Balance */}
+                <Text style={styles.balanceText}>
+                  {displayBalance} {activeAccount.currency}
+                </Text>
+              </>
+            ) : (
+              <View style={{ paddingVertical: 20, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="small" color="#F59E0B" />
+                <Text style={{ marginTop: 8, fontSize: 13, color: '#6B7280' }}>
+                  Connecting account…
                 </Text>
               </View>
-              <View style={styles.chipPill}>
-                <Text style={styles.chipText}>{activeAccount.server}</Text>
-              </View>
-              <View style={styles.chipPill}>
-                <Text style={styles.chipText}>{activeAccount.plan}</Text>
-              </View>
-            </View>
-
-            {/* Big Balance */}
-            <Text style={styles.balanceText}>
-              {displayBalance} {activeAccount.currency}
-            </Text>
+            )}
 
             {/* Circular Quick Action Buttons (Trade, Deposit, Withdraw) */}
             <View style={styles.quickActionsRow}>
@@ -435,7 +424,12 @@ export const AccountsScreen: React.FC = () => {
 
         {/* ORDERS CONTENT & NEXT TRADES CAROUSEL */}
         <View style={styles.ordersContent}>
-          {activeTab === 'Open' ? (
+          {isTradingLoading ? (
+            <View style={styles.tabLoadingContainer}>
+              <ActivityIndicator size="small" color="#F59E0B" />
+              <Text style={styles.tabLoadingText}>Loading trading data…</Text>
+            </View>
+          ) : activeTab === 'Open' ? (
             currentOpenOrders.length > 0 ? (
               <View>
                 {/* Total P/L Row */}
@@ -559,9 +553,9 @@ export const AccountsScreen: React.FC = () => {
               </View>
             )
           ) : (
-            <View>
-              {/* Closed Orders */}
-              {currentClosedOrders.length > 0 && (
+            currentClosedOrders.length > 0 ? (
+              <View>
+                {/* Closed Orders */}
                 <View style={styles.totalPnlRow}>
                   <Text style={styles.closedDateLabel}>Closed Orders</Text>
                   <Text style={styles.closedPnlValue}>
@@ -571,40 +565,45 @@ export const AccountsScreen: React.FC = () => {
                     USD
                   </Text>
                 </View>
-              )}
 
-              {currentClosedOrders.map((order) => (
-                <TouchableOpacity
-                  key={order.id}
-                  activeOpacity={0.8}
-                  onPress={() => setSelectedClosedOrder(order)}
-                  style={styles.closedCard}
-                >
-                  <View style={styles.closedLeftRow}>
-                    <View style={styles.symbolIconWrapper}>
-                      <SymbolIcon symbol={order.symbol} size={34} />
+                {currentClosedOrders.map((order) => (
+                  <TouchableOpacity
+                    key={order.id}
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedClosedOrder(order)}
+                    style={styles.closedCard}
+                  >
+                    <View style={styles.closedLeftRow}>
+                      <View style={styles.symbolIconWrapper}>
+                        <SymbolIcon symbol={order.symbol} size={34} />
+                      </View>
+                      <View style={{ marginLeft: 12 }}>
+                        <Text style={styles.closedSymbol}>{order.symbol}</Text>
+                        <Text style={styles.closedOrderTypeLot}>
+                          <Text style={styles.buyText}>{order.type} {order.lot} lot</Text> at {order.openPrice}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{ marginLeft: 12 }}>
-                      <Text style={styles.closedSymbol}>{order.symbol}</Text>
-                      <Text style={styles.closedOrderTypeLot}>
-                        <Text style={styles.buyText}>{order.type} {order.lot} lot</Text> at {order.openPrice}
-                      </Text>
+
+                    <View style={styles.closedRightCol}>
+                      <Text style={styles.closedPnlText}>{order.pnl} USD</Text>
+                      <Text style={styles.closedPriceText}>{order.closePrice}</Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
+                ))}
 
-                  <View style={styles.closedRightCol}>
-                    <Text style={styles.closedPnlText}>{order.pnl} USD</Text>
-                    <Text style={styles.closedPriceText}>{order.closePrice}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-
-              <View style={styles.closedRangeContainer}>
-                <Text style={styles.closedRangeText}>
-                  Showing closed orders for the last 30 days
-                </Text>
+                <View style={styles.closedRangeContainer}>
+                  <Text style={styles.closedRangeText}>
+                    Showing closed orders for the last 30 days
+                  </Text>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View style={styles.emptyPendingContainer}>
+                <Ionicons name="receipt-outline" size={40} color="#9CA3AF" style={{ marginBottom: 12 }} />
+                <Text style={styles.noOrdersText}>No closed orders in the last 30 days.</Text>
+              </View>
+            )
           )}
         </View>
 
@@ -624,7 +623,7 @@ export const AccountsScreen: React.FC = () => {
                 console.warn('Failed to close position via MT5:', e);
               }
             }
-            setOpenOrders((prev) => prev.filter((o) => o.id !== closingOrder.id));
+            void refreshTrading();
             setClosingOrder(null);
           }
         }}
@@ -665,14 +664,28 @@ export const AccountsScreen: React.FC = () => {
       <SwitchAccountModal
         visible={showSwitchAccount}
         accounts={accounts}
-        activeAccountId={activeAccount.id}
-        onSelectAccount={(account) => {
-          setActiveAccount(account);
-          setShowSwitchAccount(false);
-        }}
+        activeAccountId={activeAccount?.id ?? ''}
+        isLoading={isLoadingAccounts}
+        onSelectAccount={handleSelectAccount}
         onOpenNewAccount={() => setShowOpenAccount(true)}
         onClose={() => setShowSwitchAccount(false)}
       />
+
+      {/* MT5 Password Login Modal for fallback authentication */}
+      <Mt5PasswordLoginModal
+        visible={loginAccountForPassword !== null}
+        account={loginAccountForPassword}
+        onSuccess={() => {
+          if (loginAccountForPassword) {
+            completeSwitch(loginAccountForPassword);
+          }
+          setLoginAccountForPassword(null);
+        }}
+        onClose={() => setLoginAccountForPassword(null)}
+      />
+
+      {/* Animated Account Switch Overlay with blur & success check */}
+      <AccountSwitchOverlay switchState={switchState} />
 
       {/* Open Account Modal */}
       <OpenAccountModal
@@ -1152,5 +1165,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 40,
+  },
+  tabLoadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  tabLoadingText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
   },
 });

@@ -6,3 +6,5 @@ export * from './SwitchAccountModal';
 export * from './OpenAccountModal';
 export * from './ChartOrdersModal';
 export * from './VerifyContactDetailsModal';
+export * from './AccountSwitchOverlay';
+export * from './Mt5PasswordLoginModal';

@@ -19,36 +19,33 @@ import {
 
 const ACTIVE_ACCOUNT_STORAGE_KEY = 'exness-clone.active-account.v1';
 
+export interface AccountSwitchState {
+  login: string;
+  isDemo: boolean;
+  done: boolean;
+}
+
+export const DEFAULT_PLACEHOLDER_ACCOUNT: AccountItem = {
+  id: '',
+  accountNumber: '—',
+  type: 'Demo',
+  server: 'Exness',
+  plan: 'Standard',
+  balance: '0.00',
+  currency: 'USD',
+};
+
 interface AccountContextType {
   accounts: AccountItem[];
   activeAccount: AccountItem;
   isLoadingAccounts: boolean;
-  setActiveAccount: (account: AccountItem) => Promise<void>;
+  switchState: AccountSwitchState | null;
+  setActiveAccount: (account: AccountItem) => Promise<{ success: boolean; account: AccountItem }>;
+  completeSwitch: (account: AccountItem) => void;
   addAccount: (account: AccountItem) => void;
   updateBalance: (id: string, newBalance: string) => void;
   refreshAccounts: () => Promise<void>;
 }
-
-const INITIAL_FALLBACK_ACCOUNTS: AccountItem[] = [
-  {
-    id: 'demo-15000113413',
-    accountNumber: '15000113413',
-    type: 'Demo',
-    server: 'Exness',
-    plan: 'Standard',
-    balance: '9,996.15',
-    currency: 'USD',
-  },
-  {
-    id: 'real-14000102647',
-    accountNumber: '14000102647',
-    type: 'Real',
-    server: 'Exness',
-    plan: 'Standard',
-    balance: '0.00',
-    currency: 'USD',
-  },
-];
 
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
@@ -71,12 +68,17 @@ function mapBrokerAccount(acc: BrokerTradingAccount): AccountItem {
 }
 
 export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [accounts, setAccounts] = useState<AccountItem[]>(INITIAL_FALLBACK_ACCOUNTS);
-  const [activeAccount, setActiveAccountState] = useState<AccountItem>(INITIAL_FALLBACK_ACCOUNTS[0]);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [activeAccount, setActiveAccountState] = useState<AccountItem>(DEFAULT_PLACEHOLDER_ACCOUNT);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
+  const [switchState, setSwitchState] = useState<AccountSwitchState | null>(null);
 
   const fetchAccounts = useCallback(async () => {
-    if (!brokerSession.isAuthenticated()) return;
+    if (!brokerSession.isAuthenticated()) {
+      setAccounts([]);
+      setActiveAccountState(DEFAULT_PLACEHOLDER_ACCOUNT);
+      return;
+    }
 
     setIsLoadingAccounts(true);
     try {
@@ -104,6 +106,9 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
           // Auto bootstrap MT5 session for this account
           void ensureMt5Session(candidate.accountNumber);
         }
+      } else {
+        setAccounts([]);
+        setActiveAccountState(DEFAULT_PLACEHOLDER_ACCOUNT);
       }
     } catch (err) {
       console.warn('[AccountContext] Failed to load trading accounts:', err);
@@ -118,12 +123,15 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const unsub = brokerSession.subscribe((tokens) => {
       if (tokens.accessToken) {
         fetchAccounts();
+      } else {
+        setAccounts([]);
+        setActiveAccountState(DEFAULT_PLACEHOLDER_ACCOUNT);
       }
     });
     return () => unsub();
   }, [fetchAccounts]);
 
-  const setActiveAccount = useCallback(async (account: AccountItem) => {
+  const completeSwitch = useCallback(async (account: AccountItem) => {
     setActiveAccountState(account);
     if (Platform.OS !== 'web') {
       try {
@@ -131,13 +139,42 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } catch {}
     }
 
-    // Switch MT5 account session token
-    try {
-      await startMt5SessionFromCrm(account.accountNumber);
-    } catch (err) {
-      console.warn('[AccountContext] Could not switch MT5 session for', account.accountNumber, err);
-    }
+    setSwitchState({
+      login: account.accountNumber,
+      isDemo: account.type === 'Demo',
+      done: true,
+    });
+
+    setTimeout(() => {
+      setSwitchState(null);
+    }, 700);
   }, []);
+
+  const setActiveAccount = useCallback(
+    async (account: AccountItem): Promise<{ success: boolean; account: AccountItem }> => {
+      // 1. Trigger animated switch overlay
+      setSwitchState({
+        login: account.accountNumber,
+        isDemo: account.type === 'Demo',
+        done: false,
+      });
+
+      try {
+        // 2. Request MT5 session token from server
+        await startMt5SessionFromCrm(account.accountNumber);
+
+        // 3. Mark switch complete
+        await completeSwitch(account);
+        return { success: true, account };
+      } catch (err) {
+        console.warn('[AccountContext] Auto-session not available for', account.accountNumber, err);
+        // Clear overlay so fallback password modal can be displayed
+        setSwitchState(null);
+        return { success: false, account };
+      }
+    },
+    [completeSwitch],
+  );
 
   const addAccount = useCallback((newAccount: AccountItem) => {
     setAccounts((prev) => [newAccount, ...prev]);
@@ -148,7 +185,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setAccounts((prev) =>
       prev.map((acc) => (acc.id === id ? { ...acc, balance: newBalance } : acc)),
     );
-    setActiveAccountState((prev) => (prev.id === id ? { ...prev, balance: newBalance } : prev));
+    setActiveAccountState((prev) => (prev?.id === id ? { ...prev, balance: newBalance } : prev));
   }, []);
 
   const value = useMemo(
@@ -156,12 +193,24 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
       accounts,
       activeAccount,
       isLoadingAccounts,
+      switchState,
       setActiveAccount,
+      completeSwitch,
       addAccount,
       updateBalance,
       refreshAccounts: fetchAccounts,
     }),
-    [accounts, activeAccount, isLoadingAccounts, setActiveAccount, addAccount, updateBalance, fetchAccounts],
+    [
+      accounts,
+      activeAccount,
+      isLoadingAccounts,
+      switchState,
+      setActiveAccount,
+      completeSwitch,
+      addAccount,
+      updateBalance,
+      fetchAccounts,
+    ],
   );
 
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,7 @@ interface SwitchAccountModalProps {
   visible: boolean;
   accounts: AccountItem[];
   activeAccountId: string;
+  isLoading?: boolean;
   onSelectAccount: (account: AccountItem) => void;
   onOpenNewAccount: () => void;
   onClose: () => void;
@@ -33,6 +35,7 @@ export const SwitchAccountModal: React.FC<SwitchAccountModalProps> = ({
   visible,
   accounts,
   activeAccountId,
+  isLoading = false,
   onSelectAccount,
   onOpenNewAccount,
   onClose,
@@ -97,19 +100,32 @@ export const SwitchAccountModal: React.FC<SwitchAccountModalProps> = ({
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
           >
-            {filteredAccounts.map((item) => {
-              const isActive = item.id === activeAccountId;
+            {isLoading ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="small" color="#F59E0B" />
+                <Text style={{ marginTop: 10, fontSize: 13, color: '#6B7280' }}>
+                  Loading accounts…
+                </Text>
+              </View>
+            ) : filteredAccounts.length === 0 ? (
+              <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+                <Text style={{ fontSize: 14, color: '#6B7280' }}>
+                  No {selectedTab.toLowerCase()} accounts found.
+                </Text>
+              </View>
+            ) : (
+              filteredAccounts.map((item) => {
+                const isActive = item.id === activeAccountId;
 
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    onSelectAccount(item);
-                    onClose();
-                  }}
-                  style={[styles.accountCard, isActive && styles.accountCardSelected]}
-                >
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    activeOpacity={0.75}
+                    onPress={() => {
+                      onSelectAccount(item);
+                    }}
+                    style={[styles.accountCard, isActive && styles.accountCardSelected]}
+                  >
                   <View style={styles.cardLeft}>
                     <Text style={styles.accountNumber}>
                       {item.plan} # {item.accountNumber}
@@ -158,7 +174,7 @@ export const SwitchAccountModal: React.FC<SwitchAccountModalProps> = ({
                   )}
                 </TouchableOpacity>
               );
-            })}
+            }))}
 
             {/* Open New Account Button */}
             <TouchableOpacity
