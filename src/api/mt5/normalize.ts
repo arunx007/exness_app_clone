@@ -3,6 +3,7 @@ import type {
   Mt5Order,
   Mt5Position,
   Mt5Profile,
+  Mt5Symbol,
   OrderSide,
   OrderType,
 } from './types';
@@ -398,3 +399,65 @@ export function normalizeHistory(payload: unknown): Mt5HistoryDeal[] {
       return b.ticket - a.ticket;
     });
 }
+
+function decimalPlaces(value: unknown): number {
+  const text = String(value ?? '');
+  const decimal = text.indexOf('.');
+  return decimal < 0 ? 0 : text.length - decimal - 1;
+}
+
+export function normalizeSymbol(raw: unknown): Mt5Symbol | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Record<string, unknown>;
+  const symbol = stringValue(item.symbol ?? item.Symbol);
+  if (!symbol) return null;
+
+  const bidRaw = item.bid ?? item.Bid;
+  const askRaw = item.ask ?? item.Ask;
+  const bid = numberValue(bidRaw);
+  const ask = numberValue(askRaw, bid);
+  const digits = numberValue(
+    item.digits ?? item.Digits,
+    Math.max(decimalPlaces(bidRaw), decimalPlaces(askRaw), 5),
+  );
+
+  return {
+    symbol,
+    description:
+      stringValue(item.description ?? item.Description ?? item.name ?? item.Name) || undefined,
+    digits: Math.max(0, Math.trunc(digits)),
+    bid,
+    ask,
+    spread: numberValue(item.spread ?? item.Spread, ask - bid),
+    changePercent: numberValue(
+      item.changePercent ?? item.changePct ?? item.ChangePct ?? item.ChangePercent,
+    ),
+    contractSize: optionalNumber(item.contractSize ?? item.ContractSize),
+    volumeMin: optionalNumber(item.volumeMin ?? item.VolumeMin),
+    volumeMax: optionalNumber(item.volumeMax ?? item.VolumeMax),
+    volumeStep: optionalNumber(item.volumeStep ?? item.VolumeStep),
+    volumeLimit: optionalNumber(item.volumeLimit ?? item.VolumeLimit),
+    category: stringValue(item.category ?? item.Category) || undefined,
+    path: stringValue(item.path ?? item.Path) || undefined,
+    currency: stringValue(item.currency ?? item.Currency) || undefined,
+    currencyProfit:
+      stringValue(item.currencyProfit ?? item.CurrencyProfit) || undefined,
+    currencyMargin:
+      stringValue(item.currencyMargin ?? item.CurrencyMargin) || undefined,
+    point: optionalNumber(item.point ?? item.Point),
+    tickSize: optionalNumber(item.tickSize ?? item.TickSize),
+    tickValue: optionalNumber(item.tickValue ?? item.TickValue),
+    swapLong: optionalNumber(item.swapLong ?? item.SwapLong),
+    swapShort: optionalNumber(item.swapShort ?? item.SwapShort),
+    stopsLevel: optionalNumber(item.stopsLevel ?? item.StopsLevel),
+    tradeMode: optionalNumber(item.tradeMode ?? item.TradeMode),
+  };
+}
+
+export function normalizeSymbolsPayload(payload: unknown): Mt5Symbol[] {
+  const rows = extractRows(payload, ['symbols', 'Symbols', 'items', 'data', 'result']);
+  return rows
+    .map(normalizeSymbol)
+    .filter((symbol): symbol is Mt5Symbol => symbol !== null);
+}
+

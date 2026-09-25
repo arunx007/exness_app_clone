@@ -5,6 +5,7 @@ import {
   normalizeOrders,
   normalizePositions,
   normalizeProfile,
+  normalizeSymbolsPayload,
 } from './normalize';
 import type {
   ChangePasswordRequest,
@@ -15,6 +16,7 @@ import type {
   Mt5Order,
   Mt5Position,
   Mt5Profile,
+  Mt5Symbol,
   Mt5TransferRequest,
   ModifyOrderRequest,
   ModifyPositionRequest,
@@ -40,6 +42,12 @@ export const mt5TradingService = {
       method: 'POST',
       body: payload,
     });
+  },
+
+  /* Symbols */
+  async getSymbols(signal?: AbortSignal): Promise<Mt5Symbol[]> {
+    const payload = await mt5Request<unknown>(MT5_ENDPOINTS.TRADING.SYMBOLS, { signal });
+    return normalizeSymbolsPayload(payload);
   },
 
   /* Positions */

@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AccountDetailsModal } from './AccountDetailsModal';
@@ -107,6 +107,7 @@ export const AccountsScreen: React.FC = () => {
   } = useTradingData();
 
   const isFocused = useIsFocused();
+  const navigation = useNavigation<any>();
   const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
   const [showOpenAccount, setShowOpenAccount] = useState(false);
@@ -327,7 +328,7 @@ export const AccountsScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.tradeYellowCircle}
                   activeOpacity={0.85}
-                  onPress={() => setShowChartModal(true)}
+                  onPress={() => navigation.navigate('Trade')}
                 >
                   <Ionicons name="options-outline" size={24} color="#111827" />
                 </TouchableOpacity>
