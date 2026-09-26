@@ -591,6 +591,7 @@ export const TradeScreen: React.FC = () => {
           <ChartScreen
             symbol={selectedChartSymbol}
             onClose={() => setSelectedChartSymbol(null)}
+            onSymbolChange={(newSym) => setSelectedChartSymbol(newSym)}
           />
         </Modal>
       )}

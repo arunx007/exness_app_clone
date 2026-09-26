@@ -39,6 +39,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 interface ChartScreenProps {
   symbol?: string;
   onClose?: () => void;
+  onSymbolChange?: (symbol: string) => void;
 }
 
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1D'];
@@ -46,6 +47,7 @@ const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1D'];
 export const ChartScreen: React.FC<ChartScreenProps> = ({
   symbol = 'BTCUSD',
   onClose,
+  onSymbolChange,
 }) => {
   const insets = useSafeAreaInsets();
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
@@ -59,6 +61,16 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       setCurrentSymbol(symbol);
     }
   }, [symbol]);
+
+  const handleSelectSymbol = useCallback((newSym: string) => {
+    setCurrentSymbol(newSym);
+    const found = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, newSym));
+    if (found) {
+      setBidPrice(found.bid);
+    }
+    onSymbolChange?.(newSym);
+    setShowSymbolPicker(false);
+  }, [onSymbolChange]);
 
   const catalogEntry = useMemo(() => {
     return (
@@ -728,6 +740,14 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           )}
         </View>
       )}
+
+      {/* Symbol Picker Modal */}
+      <SymbolPickerModal
+        visible={showSymbolPicker}
+        selectedSymbol={currentSymbol}
+        onSelectSymbol={handleSelectSymbol}
+        onClose={() => setShowSymbolPicker(false)}
+      />
 
       {/* Switch Account Modal */}
       <SwitchAccountModal
