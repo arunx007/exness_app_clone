@@ -11,12 +11,36 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { PositionOrder } from '../cards/OrderCard';
+import { SymbolIcon } from '../common/SymbolIcon';
+
+export interface PendingOrderItem {
+  ticket: number;
+  symbol: string;
+  type: string;
+  volume: number;
+  price: string;
+  openTime?: string | number;
+}
+
+export interface ClosedOrderItem {
+  id: string;
+  symbol: string;
+  type: string;
+  lot: number;
+  openPrice: string;
+  closePrice: string;
+  pnl: string;
+  isProfit?: boolean;
+}
 
 interface ChartOrdersModalProps {
   visible: boolean;
   onClose: () => void;
   orders: PositionOrder[];
+  pendingOrders?: PendingOrderItem[];
+  closedOrders?: ClosedOrderItem[];
   onOrderPress?: (order: PositionOrder) => void;
+  onCancelPending?: (ticket: number) => void;
   initialTab?: 'Open' | 'Pending' | 'Closed';
 }
 
@@ -24,7 +48,10 @@ export const ChartOrdersModal: React.FC<ChartOrdersModalProps> = ({
   visible,
   onClose,
   orders,
+  pendingOrders = [],
+  closedOrders = [],
   onOrderPress,
+  onCancelPending,
   initialTab = 'Open',
 }) => {
   const insets = useSafeAreaInsets();
@@ -142,16 +169,23 @@ export const ChartOrdersModal: React.FC<ChartOrdersModalProps> = ({
                     activeOpacity={0.8}
                     onPress={() => setActiveTab('Pending')}
                   >
-                    <Text
-                      style={[
-                        styles.tabText,
-                        activeTab === 'Pending'
-                          ? styles.tabTextActive
-                          : styles.tabTextInactive,
-                      ]}
-                    >
-                      Pending
-                    </Text>
+                    <View style={styles.tabInnerRow}>
+                      <Text
+                        style={[
+                          styles.tabText,
+                          activeTab === 'Pending'
+                            ? styles.tabTextActive
+                            : styles.tabTextInactive,
+                        ]}
+                      >
+                        Pending
+                      </Text>
+                      {pendingOrders.length > 0 && (
+                        <View style={styles.tabBadge}>
+                          <Text style={styles.tabBadgeText}>{pendingOrders.length}</Text>
+                        </View>
+                      )}
+                    </View>
                   </TouchableOpacity>
 
                   {/* Closed Tab */}
@@ -199,10 +233,8 @@ export const ChartOrdersModal: React.FC<ChartOrdersModalProps> = ({
                       >
                         {/* Left: Icon + Symbol + Type & Lot */}
                         <View style={styles.orderCardLeft}>
-                          <View style={styles.cryptoIcon}>
-                            <Text style={styles.cryptoIconText}>₿</Text>
-                          </View>
-                          <View>
+                          <SymbolIcon symbol={order.symbol} size={32} />
+                          <View style={{ marginLeft: 10 }}>
                             <Text style={styles.symbolName}>{order.symbol}</Text>
                             <Text style={styles.orderMetaText}>
                               <Text style={styles.buyText}>
@@ -240,13 +272,74 @@ export const ChartOrdersModal: React.FC<ChartOrdersModalProps> = ({
                     </View>
                   )
                 ) : activeTab === 'Pending' ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No pending orders</Text>
-                  </View>
+                  pendingOrders.length > 0 ? (
+                    pendingOrders.map((ord) => (
+                      <View key={ord.ticket} style={styles.orderCard}>
+                        <View style={styles.orderCardLeft}>
+                          <SymbolIcon symbol={ord.symbol} size={32} />
+                          <View style={{ marginLeft: 10 }}>
+                            <Text style={styles.symbolName}>{ord.symbol}</Text>
+                            <Text style={styles.orderMetaText}>
+                              <Text style={styles.buyText}>
+                                {ord.type.replace('_', ' ')} {ord.volume} lot
+                              </Text>{' '}
+                              at {ord.price}
+                            </Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.cancelPendingBtn}
+                          activeOpacity={0.7}
+                          onPress={() => onCancelPending?.(ord.ticket)}
+                        >
+                          <Text style={styles.cancelPendingText}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>No pending orders</Text>
+                    </View>
+                  )
                 ) : (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No closed orders today</Text>
-                  </View>
+                  closedOrders.length > 0 ? (
+                    closedOrders.map((cord) => (
+                      <View key={cord.id} style={styles.orderCard}>
+                        <View style={styles.orderCardLeft}>
+                          <SymbolIcon symbol={cord.symbol} size={32} />
+                          <View style={{ marginLeft: 10 }}>
+                            <Text style={styles.symbolName}>{cord.symbol}</Text>
+                            <Text style={styles.orderMetaText}>
+                              <Text style={styles.buyText}>
+                                {cord.type} {cord.lot} lot
+                              </Text>{' '}
+                              at {cord.openPrice}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.orderCardRight}>
+                          <Text
+                            style={[
+                              styles.pnlText,
+                              {
+                                color:
+                                  cord.isProfit || parseFloat(cord.pnl) >= 0
+                                    ? '#10B981'
+                                    : '#EF4444',
+                              },
+                            ]}
+                          >
+                            {cord.pnl} USD
+                          </Text>
+                          <Text style={styles.currentPriceText}>{cord.closePrice}</Text>
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>No closed orders today</Text>
+                    </View>
+                  )
                 )}
         </ScrollView>
       </Animated.View>
@@ -403,5 +496,16 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#9CA3AF',
+  },
+  cancelPendingBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#FEF2F2',
+  },
+  cancelPendingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
   },
 });

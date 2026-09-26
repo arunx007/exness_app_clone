@@ -20,6 +20,8 @@ import { PositionOrder } from '../cards/OrderCard';
 interface ModifyOrderModalProps {
   visible: boolean;
   order: PositionOrder | null;
+  onConfirmModify?: (payload: { ticket: number; stopLoss?: number; takeProfit?: number }) => Promise<void> | void;
+  onPartialClose?: (payload: { ticket: number; volume: number; symbol: string }) => Promise<void> | void;
   onCloseOrder?: () => void;
   onDismiss: () => void;
 }
@@ -27,6 +29,8 @@ interface ModifyOrderModalProps {
 export const ModifyOrderModal: React.FC<ModifyOrderModalProps> = ({
   visible,
   order,
+  onConfirmModify,
+  onPartialClose,
   onCloseOrder,
   onDismiss,
 }) => {
@@ -41,8 +45,37 @@ export const ModifyOrderModal: React.FC<ModifyOrderModalProps> = ({
 
   // Partial Close Tab State
   const [closingVolume, setClosingVolume] = useState('0.02');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!order) return null;
+
+  const handleConfirmModify = async () => {
+    if (!order) return;
+    const ticket = parseInt(order.id.replace('ord-btc-', '').replace('ord-', ''), 10) || 7730671;
+    const sl = stopLossEnabled && stopLossPrice ? parseFloat(stopLossPrice) : undefined;
+    const tp = takeProfitEnabled && takeProfitPrice ? parseFloat(takeProfitPrice) : undefined;
+    setIsSubmitting(true);
+    try {
+      await onConfirmModify?.({ ticket, stopLoss: sl, takeProfit: tp });
+      onDismiss();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePartialClose = async () => {
+    if (!order) return;
+    const ticket = parseInt(order.id.replace('ord-btc-', '').replace('ord-', ''), 10) || 7730671;
+    const vol = parseFloat(closingVolume);
+    if (!vol || vol <= 0) return;
+    setIsSubmitting(true);
+    try {
+      await onPartialClose?.({ ticket, volume: vol, symbol: order.symbol });
+      onDismiss();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const adjustStopLoss = (amount: number) => {
     const val = (parseFloat(stopLossPrice || '0') + amount).toFixed(2);

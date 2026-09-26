@@ -119,6 +119,7 @@ export const AccountsScreen: React.FC = () => {
     isLoading: isTradingLoading,
     refresh: refreshTrading,
     closePosition,
+    modifyPosition,
     cancelPendingOrder,
   } = useTradingData();
 
@@ -668,6 +669,14 @@ export const AccountsScreen: React.FC = () => {
       <ModifyOrderModal
         visible={modifyingOrder !== null}
         order={modifyingOrder}
+        onConfirmModify={async (params) => {
+          await modifyPosition(params);
+          void refreshTrading();
+        }}
+        onPartialClose={async ({ ticket, volume, symbol }) => {
+          await closePosition(ticket, volume, symbol);
+          void refreshTrading();
+        }}
         onCloseOrder={() => {
           if (modifyingOrder) {
             const ord = modifyingOrder;

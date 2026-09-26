@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import Svg, { Line, Rect, Text as SvgText, G, Circle } from 'react-native-svg';
 
 import * as SecureStore from 'expo-secure-store';
 import { useAccount } from '../../context/AccountContext';
+import { useTradingData } from '../../context/TradingDataContext';
 import {
   SwitchAccountModal,
   OpenAccountModal,
@@ -99,28 +100,60 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     lots: 4.76,
   });
 
+  const {
+    positions,
+    orders,
+    history,
+    placeMarketOrder,
+    placePendingOrder,
+    modifyPosition,
+    modifyPendingOrder,
+    closePosition,
+    closeAllPositions,
+    closeProfitablePositions,
+    cancelPendingOrder,
+    refresh: refreshTrading,
+  } = useTradingData();
+
+  // Active positions list mapped dynamically from TradingDataContext
+  const activeOrders: PositionOrder[] = useMemo(() => {
+    return positions.map((p) => {
+      const pnl = p.profit;
+      const isProfit = pnl >= 0;
+      return {
+        id: String(p.ticket),
+        symbol: p.symbol,
+        type: p.type === 'BUY' ? 'Buy' : 'Sell',
+        lot: p.volume,
+        openPrice: p.openPrice.toFixed(2),
+        currentPrice: p.currentPrice.toFixed(2),
+        pnl: `${isProfit ? '+' : ''}${pnl.toFixed(2)}`,
+        isProfit,
+      };
+    });
+  }, [positions]);
+
+  const totalPnlNumber = useMemo(() => {
+    return positions.reduce((sum, p) => sum + p.profit, 0);
+  }, [positions]);
+
+  const totalPnlFormatted = `${totalPnlNumber >= 0 ? '+' : ''}${totalPnlNumber.toFixed(2)}`;
+
+  const profitablePositionsCount = useMemo(() => {
+    return positions.filter((p) => p.profit > 0).length;
+  }, [positions]);
+
   // Live prices
   const [bidPrice, setBidPrice] = useState(83751.82);
   const askPrice = parseFloat((bidPrice + 10.0).toFixed(2));
-  const orderPnl = ((bidPrice - 83954.32) * 0.01).toFixed(2);
+  const primaryPosition = positions[0];
+  const orderPnl = primaryPosition
+    ? `${primaryPosition.profit >= 0 ? '+' : ''}${primaryPosition.profit.toFixed(2)}`
+    : totalPnlFormatted;
   const [closingOrder, setClosingOrder] = useState<PositionOrder | null>(null);
   const [showOrdersModal, setShowOrdersModal] = useState<boolean>(false);
   const [ordersModalTab, setOrdersModalTab] = useState<'Open' | 'Pending' | 'Closed'>('Open');
   const [modifyingOrder, setModifyingOrder] = useState<PositionOrder | null>(null);
-
-  // Active positions list
-  const [activeOrders, setActiveOrders] = useState<PositionOrder[]>([
-    {
-      id: 'ord-btc-active',
-      symbol: symbol || 'BTC',
-      type: 'Buy',
-      lot: 0.01,
-      openPrice: '83954.32',
-      currentPrice: '83751.82',
-      pnl: '-0.38',
-      isProfit: false,
-    },
-  ]);
 
   // Load "Don't show again" preference for One-click trading modal
   useEffect(() => {
@@ -165,19 +198,13 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     });
   };
 
-  const handleSellPress = () => {
+  const handleSellPress = async () => {
     if (oneClickEnabled) {
-      const newOrd: PositionOrder = {
-        id: `ord-${Date.now()}`,
-        symbol: symbol || 'BTC',
-        type: 'Sell',
-        lot: tradingLots,
-        openPrice: bidPrice.toFixed(2),
-        currentPrice: bidPrice.toFixed(2),
-        pnl: '0.00',
-        isProfit: true,
-      };
-      setActiveOrders((prev) => [newOrd, ...prev]);
+      await placeMarketOrder({
+        symbol: symbol || 'BTCUSD',
+        side: 'SELL',
+        volume: tradingLots,
+      });
     } else {
       setOrderExecutionModal({
         visible: true,
@@ -190,19 +217,13 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     }
   };
 
-  const handleBuyPress = () => {
+  const handleBuyPress = async () => {
     if (oneClickEnabled) {
-      const newOrd: PositionOrder = {
-        id: `ord-${Date.now()}`,
-        symbol: symbol || 'BTC',
-        type: 'Buy',
-        lot: tradingLots,
-        openPrice: askPrice.toFixed(2),
-        currentPrice: askPrice.toFixed(2),
-        pnl: '0.00',
-        isProfit: true,
-      };
-      setActiveOrders((prev) => [newOrd, ...prev]);
+      await placeMarketOrder({
+        symbol: symbol || 'BTCUSD',
+        side: 'BUY',
+        volume: tradingLots,
+      });
     } else {
       setOrderExecutionModal({
         visible: true,
@@ -215,24 +236,37 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     }
   };
 
-  const handleConfirmOrder = (payload: NewOrderPayload) => {
-    const newOrd: PositionOrder = {
-      id: `ord-${Date.now()}`,
-      symbol: payload.symbol,
-      type: payload.orderType,
-      lot: payload.lot,
-      openPrice: payload.price.toFixed(2),
-      currentPrice: payload.orderType === 'Buy' ? askPrice.toFixed(2) : bidPrice.toFixed(2),
-      pnl: '0.00',
-      isProfit: true,
-    };
-    setActiveOrders((prev) => [newOrd, ...prev]);
+  const handleConfirmOrder = async (payload: NewOrderPayload) => {
     setOrderExecutionModal((prev) => ({ ...prev, visible: false }));
+    if (payload.executionType === 'Market') {
+      await placeMarketOrder({
+        symbol: payload.symbol,
+        side: payload.orderType === 'Buy' ? 'BUY' : 'SELL',
+        volume: payload.lot,
+        stopLoss: payload.stopLoss,
+        takeProfit: payload.takeProfit,
+      });
+    } else {
+      let pendingType: 'BuyLimit' | 'BuyStop' | 'SellLimit' | 'SellStop';
+      if (payload.orderType === 'Buy') {
+        pendingType = payload.executionType === 'Limit' ? 'BuyLimit' : 'BuyStop';
+      } else {
+        pendingType = payload.executionType === 'Limit' ? 'SellLimit' : 'SellStop';
+      }
+      await placePendingOrder({
+        symbol: payload.symbol,
+        type: pendingType,
+        volume: payload.lot,
+        price: payload.price,
+        stopLoss: payload.stopLoss,
+        takeProfit: payload.takeProfit,
+      });
+    }
   };
 
-  const handleCloseAll = () => {
+  const handleCloseAll = async () => {
     if (oneClickEnabled) {
-      setActiveOrders([]);
+      await closeAllPositions();
     } else {
       if (activeOrders.length > 0) {
         setClosingOrder(activeOrders[0]);
@@ -293,7 +327,8 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   const candleSlotWidth = chartWidth / INITIAL_CANDLES.length;
   const candleBodyWidth = Math.max(candleSlotWidth * 0.6, 5);
 
-  const orderLineY = getYForPrice(83954.32);
+  const activeOpenPrice = activeOrders.length > 0 ? parseFloat(activeOrders[0].openPrice) : 83954.32;
+  const orderLineY = getYForPrice(activeOpenPrice);
   const currentBidY = getYForPrice(bidPrice);
   const previewPrice = orderExecutionModal.isPending
     ? orderExecutionModal.pendingPrice
@@ -467,14 +502,14 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                 <TouchableOpacity
                   style={styles.closeProfitableCircle}
                   activeOpacity={0.7}
-                  onPress={() => {
-                    setActiveOrders((prev) => prev.filter((o) => !o.isProfit));
+                  onPress={async () => {
+                    await closeProfitablePositions();
                   }}
                 >
                   <Ionicons name="checkmark" size={17} color="#10B981" />
                   <View style={styles.closeProfitableBadge}>
                     <Text style={styles.closeProfitableBadgeText}>
-                      {activeOrders.filter((o) => o.isProfit).length || 1}
+                      {profitablePositionsCount}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -525,7 +560,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
               >
                 <Text style={styles.pendingTabLabel}>Pending</Text>
                 <View style={styles.pendingCountBadge}>
-                  <Text style={styles.pendingCountBadgeText}>0</Text>
+                  <Text style={styles.pendingCountBadgeText}>{orders.length}</Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -754,7 +789,9 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             {/* Active Order Price Tag on Axis (Blue) */}
             {activeOrders.length > 0 && !orderExecutionModal.visible && (
               <View style={[styles.orderPriceTagAxis, { top: orderLineY - 10 }]}>
-                <Text style={styles.orderPriceTagAxisText}>83,954.32</Text>
+                <Text style={styles.orderPriceTagAxisText}>
+                  {activeOpenPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Text>
               </View>
             )}
 
@@ -779,27 +816,50 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           {/* FLOATING ORDER ACTION CHIPS ON THE ACTIVE ORDER LINE */}
           {activeOrders.length > 0 && !orderExecutionModal.visible && (
             <View style={[styles.orderLineFloatingRow, { top: orderLineY - 14 }]}>
-              <View style={styles.tpBox}>
+              <TouchableOpacity
+                style={styles.tpBox}
+                activeOpacity={0.7}
+                onPress={() => setModifyingOrder(activeOrders[0])}
+              >
                 <Text style={styles.tpText}>TP</Text>
-              </View>
-              <View style={styles.slBox}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.slBox}
+                activeOpacity={0.7}
+                onPress={() => setModifyingOrder(activeOrders[0])}
+              >
                 <Text style={styles.slText}>SL</Text>
-              </View>
-              <View style={styles.orderPillContainer}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.orderPillContainer}
+                activeOpacity={0.8}
+                onPress={() => setModifyingOrder(activeOrders[0])}
+              >
                 <View style={styles.orderLotTag}>
                   <Text style={styles.orderLotTagText}>{activeOrders[0].lot}</Text>
                 </View>
                 <View style={styles.orderPnlBox}>
-                  <Text style={styles.orderPnlBoxText}>{orderPnl} USD</Text>
+                  <Text style={styles.orderPnlBoxText}>{activeOrders[0].pnl} USD</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.orderCloseBtn}
                   activeOpacity={0.7}
-                  onPress={() => setClosingOrder(activeOrders[0])}
+                  onPress={async () => {
+                    if (oneClickEnabled) {
+                      const pos = activeOrders[0];
+                      if (pos) {
+                        const ticket = parseInt(pos.id.replace('ord-btc-', '').replace('ord-', ''), 10) || 7730671;
+                        await closePosition(ticket, pos.lot, pos.symbol);
+                        void refreshTrading();
+                      }
+                    } else {
+                      setClosingOrder(activeOrders[0]);
+                    }
+                  }}
                 >
                   <Ionicons name="close" size={14} color="#1E88E5" />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1001,7 +1061,14 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       <ClosePositionModal
         visible={closingOrder !== null}
         order={closingOrder}
-        onConfirm={() => setClosingOrder(null)}
+        onConfirm={async () => {
+          if (closingOrder) {
+            const ticket = parseInt(closingOrder.id.replace('ord-btc-', '').replace('ord-', ''), 10) || 7730671;
+            await closePosition(ticket, closingOrder.lot, closingOrder.symbol);
+            void refreshTrading();
+            setClosingOrder(null);
+          }
+        }}
         onCancel={() => setClosingOrder(null)}
       />
 
@@ -1009,8 +1076,29 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       <ChartOrdersModal
         visible={showOrdersModal}
         orders={activeOrders}
+        pendingOrders={orders.map((o) => ({
+          ticket: o.ticket,
+          symbol: o.symbol,
+          type: o.type,
+          volume: o.volume,
+          price: o.price.toFixed(2),
+          openTime: o.openTime,
+        }))}
+        closedOrders={history.map((h) => ({
+          id: String(h.ticket),
+          symbol: h.symbol,
+          type: h.type === 'BUY' ? 'Buy' : 'Sell',
+          lot: h.volume,
+          openPrice: h.openPrice.toFixed(2),
+          closePrice: h.closePrice.toFixed(2),
+          pnl: `${h.profit >= 0 ? '+' : ''}${h.profit.toFixed(2)}`,
+          isProfit: h.profit >= 0,
+        }))}
         initialTab={ordersModalTab}
         onClose={() => setShowOrdersModal(false)}
+        onCancelPending={async (ticket) => {
+          await cancelPendingOrder(ticket);
+        }}
         onOrderPress={(ord) => {
           setShowOrdersModal(false);
           setModifyingOrder(ord);
@@ -1021,6 +1109,14 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       <ModifyOrderModal
         visible={modifyingOrder !== null}
         order={modifyingOrder}
+        onConfirmModify={async (params) => {
+          await modifyPosition(params);
+          void refreshTrading();
+        }}
+        onPartialClose={async ({ ticket, volume, symbol }) => {
+          await closePosition(ticket, volume, symbol);
+          void refreshTrading();
+        }}
         onCloseOrder={() => {
           if (modifyingOrder) {
             const ord = modifyingOrder;
