@@ -139,6 +139,7 @@
         var nativeQuoteCache = Object.create(null);
         var quotePushCallbacks = [];
         var quoteSubUnsubs = Object.create(null);
+        var brokerRealtimeSubscribers = Object.create(null);
 
         var orderCallbacks = Object.create(null);
         var modifyCallbacks = Object.create(null);
@@ -358,34 +359,181 @@
           }
         }
 
+        var nativeBidAskLines = {
+          bidLine: null,
+          askLine: null,
+          lastBid: 0,
+          lastAsk: 0,
+          initializing: false,
+          init: function () {
+            if (this.initializing) return;
+            var self = this;
+            var chart =
+              window.tvWidget &&
+              typeof window.tvWidget.activeChart === 'function' &&
+              window.tvWidget.activeChart();
+            if (!chart || typeof chart.createOrderLine !== 'function') return;
+            this.initializing = true;
+
+            var createBid = Promise.resolve(chart.createOrderLine())
+              .then(function (line) {
+                self.bidLine = line;
+                try {
+                  if (typeof line.setLineColor === 'function') line.setLineColor('#1E88E5');
+                  if (typeof line.setLineStyle === 'function') line.setLineStyle(2); // dashed
+                  if (typeof line.setLineWidth === 'function') line.setLineWidth(1);
+                  if (typeof line.setLineLength === 'function') line.setLineLength(100);
+                  if (typeof line.setExtendLeft === 'function') line.setExtendLeft(true);
+                  if (typeof line.setEditable === 'function') line.setEditable(false);
+                  if (typeof line.setCancellable === 'function') line.setCancellable(false);
+                  if (typeof line.setText === 'function') line.setText('Bid');
+                  if (typeof line.setQuantity === 'function') line.setQuantity('');
+                  if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#FFFFFF');
+                  if (typeof line.setBodyBackgroundColor === 'function') {
+                    line.setBodyBackgroundColor('#1E88E5');
+                  }
+                  if (typeof line.setBodyBorderColor === 'function') {
+                    line.setBodyBorderColor('#1E88E5');
+                  }
+                  if (self.lastBid > 0 && typeof line.setPrice === 'function') {
+                    line.setPrice(self.lastBid);
+                  }
+                } catch (_) {}
+                return line;
+              })
+              .catch(function () {
+                return null;
+              });
+
+            var createAsk = Promise.resolve(chart.createOrderLine())
+              .then(function (line) {
+                self.askLine = line;
+                try {
+                  if (typeof line.setLineColor === 'function') line.setLineColor('#EF4444');
+                  if (typeof line.setLineStyle === 'function') line.setLineStyle(2); // dashed
+                  if (typeof line.setLineWidth === 'function') line.setLineWidth(1);
+                  if (typeof line.setLineLength === 'function') line.setLineLength(100);
+                  if (typeof line.setExtendLeft === 'function') line.setExtendLeft(true);
+                  if (typeof line.setEditable === 'function') line.setEditable(false);
+                  if (typeof line.setCancellable === 'function') line.setCancellable(false);
+                  if (typeof line.setText === 'function') line.setText('Ask');
+                  if (typeof line.setQuantity === 'function') line.setQuantity('');
+                  if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#FFFFFF');
+                  if (typeof line.setBodyBackgroundColor === 'function') {
+                    line.setBodyBackgroundColor('#EF4444');
+                  }
+                  if (typeof line.setBodyBorderColor === 'function') {
+                    line.setBodyBorderColor('#EF4444');
+                  }
+                  if (self.lastAsk > 0 && typeof line.setPrice === 'function') {
+                    line.setPrice(self.lastAsk);
+                  }
+                } catch (_) {}
+                return line;
+              })
+              .catch(function () {
+                return null;
+              });
+
+            Promise.all([createBid, createAsk]).then(function () {
+              self.initializing = false;
+            });
+          },
+          update: function (bid, ask) {
+            if (Number.isFinite(bid) && bid > 0) this.lastBid = bid;
+            if (Number.isFinite(ask) && ask > 0) this.lastAsk = ask;
+
+            if (!this.bidLine || !this.askLine) {
+              this.init();
+            } else {
+              try {
+                if (this.bidLine && this.lastBid > 0 && typeof this.bidLine.setPrice === 'function') {
+                  this.bidLine.setPrice(this.lastBid);
+                }
+                if (this.askLine && this.lastAsk > 0 && typeof this.askLine.setPrice === 'function') {
+                  this.askLine.setPrice(this.lastAsk);
+                }
+              } catch (_) {}
+            }
+          },
+        };
+        window.__nativeBidAskLines = nativeBidAskLines;
+
+        function ensureCountdownPatched() {
+          try {
+            var innerWin = getChartInnerWindow();
+            if (!innerWin) return;
+            var activeWidget =
+              innerWin.chartWidgetCollection &&
+              typeof innerWin.chartWidgetCollection.activeChartWidget === 'function'
+                ? innerWin.chartWidgetCollection.activeChartWidget().value()
+                : null;
+            if (
+              !activeWidget ||
+              typeof activeWidget.hasModel !== 'function' ||
+              !activeWidget.hasModel()
+            ) {
+              return;
+            }
+            var model = activeWidget.model();
+            if (!model || typeof model.mainSeries !== 'function') return;
+            var ms = model.mainSeries();
+            if (!ms || !ms._priceAxisView) return;
+
+            var proto = Object.getPrototypeOf(ms._priceAxisView);
+            if (proto && !proto.__patchedCountdown) {
+              proto.__patchedCountdown = true;
+              var origProto = proto._countdownText;
+              proto._countdownText = function () {
+                var txt = origProto ? origProto.call(this) : '';
+                if (txt) return txt;
+                try {
+                  var res = this._source.interval();
+                  var intervalMs = getIntervalMs(res);
+                  if (!intervalMs || intervalMs >= 86400000) return '';
+                  var nowMs = Date.now() + brokerTimeOffsetMs;
+                  var nextClose = Math.ceil(nowMs / intervalMs) * intervalMs;
+                  var diffSec = Math.max(0, Math.floor((nextClose - nowMs) / 1000));
+                  var mins = Math.floor(diffSec / 60);
+                  var secs = diffSec % 60;
+                  var pad = function (n) {
+                    return (n < 10 ? '0' : '') + n;
+                  };
+                  if (mins >= 60) {
+                    var hrs = Math.floor(mins / 60);
+                    mins = mins % 60;
+                    return pad(hrs) + ':' + pad(mins) + ':' + pad(secs);
+                  }
+                  return pad(mins) + ':' + pad(secs);
+                } catch (_) {
+                  return '';
+                }
+              };
+            }
+
+            if (ms.properties && ms.properties().childs) {
+              var p = ms.properties().childs();
+              if (p.showCountdown && typeof p.showCountdown.setValue === 'function') {
+                p.showCountdown.setValue(true);
+              }
+            }
+            if (ms._priceAxisView._options) {
+              ms._priceAxisView._options.showCountdown = true;
+              ms._priceAxisView._options.alwaysShowGlobalLast = true;
+            }
+            if (typeof ms._priceAxisView.updateCountdown === 'function') {
+              ms._priceAxisView.updateCountdown();
+            }
+            if (typeof model.updateSourcePriceScale === 'function') {
+              model.updateSourcePriceScale(ms);
+            }
+          } catch (_) {}
+        }
+
         function triggerCountdownTick() {
           try {
             syncChartApiServerTime();
-            var innerWin = getChartInnerWindow();
-            if (!innerWin) return;
-            if (
-              innerWin.chartWidgetCollection &&
-              typeof innerWin.chartWidgetCollection.activeChartWidget === 'function'
-            ) {
-              var activeWidget = innerWin.chartWidgetCollection.activeChartWidget().value();
-              if (
-                activeWidget &&
-                typeof activeWidget.hasModel === 'function' &&
-                activeWidget.hasModel()
-              ) {
-                var model = activeWidget.model();
-                if (model && typeof model.mainSeries === 'function') {
-                  var ms = model.mainSeries();
-                  if (
-                    ms &&
-                    ms._priceAxisView &&
-                    typeof ms._priceAxisView.updateCountdown === 'function'
-                  ) {
-                    ms._priceAxisView.updateCountdown();
-                  }
-                }
-              }
-            }
+            ensureCountdownPatched();
           } catch (_) {}
         }
 
@@ -493,6 +641,30 @@
               cb();
             } catch (_) {}
           });
+
+          // Dispatch to TradingView's Broker Realtime Subscribers for Ask/Bid lines
+          var spreadData = ensureBidAskSpread(bid, ask, norm);
+          var brokerSubs = brokerRealtimeSubscribers[norm];
+          if (brokerSubs && brokerSubs.length > 0) {
+            brokerSubs.slice().forEach(function (cb) {
+              try {
+                cb(quote.symbol || norm, { bid: spreadData.bid, ask: spreadData.ask });
+              } catch (_) {}
+            });
+          }
+          Object.keys(brokerRealtimeSubscribers).forEach(function (k) {
+            if (k !== norm && brokerRealtimeSubscribers[k] && brokerRealtimeSubscribers[k].length > 0) {
+              brokerRealtimeSubscribers[k].slice().forEach(function (cb) {
+                try {
+                  cb(k, { bid: spreadData.bid, ask: spreadData.ask });
+                } catch (_) {}
+              });
+            }
+          });
+
+          if (window.__nativeBidAskLines) {
+            window.__nativeBidAskLines.update(spreadData.bid, spreadData.ask);
+          }
         }
 
         window.__chartBridge = {
@@ -2106,7 +2278,49 @@
         };
 
         BridgeBroker.prototype.isTradable = function () {
-          return Promise.resolve(true);
+          return Promise.resolve({ tradable: true });
+        };
+
+        BridgeBroker.prototype.formatter = function (symbol, alignToMinMove) {
+          if (this._host && typeof this._host.defaultFormatter === 'function') {
+            return Promise.resolve(this._host.defaultFormatter(symbol, alignToMinMove));
+          }
+          return Promise.resolve({
+            format: function (val) {
+              return Number(val).toFixed(symbol && String(symbol).indexOf('BTC') >= 0 ? 2 : 5);
+            },
+            parse: function (str) {
+              return { res: true, value: parseFloat(str) };
+            },
+          });
+        };
+
+        BridgeBroker.prototype.spreadFormatter = function (symbol) {
+          if (this._host && typeof this._host.defaultFormatter === 'function') {
+            return Promise.resolve(this._host.defaultFormatter(symbol, false));
+          }
+          return Promise.resolve({
+            format: function (val) {
+              return Number(val).toFixed(symbol && String(symbol).indexOf('BTC') >= 0 ? 2 : 5);
+            },
+            parse: function (str) {
+              return { res: true, value: parseFloat(str) };
+            },
+          });
+        };
+
+        BridgeBroker.prototype.quantityFormatter = function (symbol) {
+          if (this._host && typeof this._host.defaultQuantityFormatter === 'function') {
+            return Promise.resolve(this._host.defaultQuantityFormatter(symbol));
+          }
+          return Promise.resolve({
+            format: function (val) {
+              return Number(val).toFixed(2);
+            },
+            parse: function (str) {
+              return { res: true, value: parseFloat(str) };
+            },
+          });
         };
 
         BridgeBroker.prototype.supportPositionBrackets = function () {
@@ -2148,6 +2362,34 @@
             minTick: symbol.indexOf('BTC') >= 0 ? 0.01 : 0.00001,
             description: symbol,
           });
+        };
+
+        BridgeBroker.prototype.subscribeRealtime = function (symbol, callback) {
+          var norm = normalizeSymbolKey(symbol);
+          if (!brokerRealtimeSubscribers[norm]) {
+            brokerRealtimeSubscribers[norm] = [];
+          }
+          if (brokerRealtimeSubscribers[norm].indexOf(callback) < 0) {
+            brokerRealtimeSubscribers[norm].push(callback);
+          }
+          var quote = nativeQuoteCache[norm];
+          var spreadData = ensureBidAskSpread(
+            quote ? quote.bid : initialPrice,
+            quote ? quote.ask : (initialPrice ? initialPrice + 10 : null),
+            norm
+          );
+          try {
+            callback(symbol, { bid: spreadData.bid, ask: spreadData.ask });
+          } catch (_) {}
+        };
+
+        BridgeBroker.prototype.unsubscribeRealtime = function (symbol, callback) {
+          var norm = normalizeSymbolKey(symbol);
+          var subs = brokerRealtimeSubscribers[norm];
+          if (subs) {
+            var idx = subs.indexOf(callback);
+            if (idx >= 0) subs.splice(idx, 1);
+          }
         };
 
         BridgeBroker.prototype.orders = function () {
@@ -2957,10 +3199,10 @@
             'mainSeriesProperties.statusViewStyle.showInterval': false,
             'mainSeriesProperties.showPriceLine': true,
             'mainSeriesProperties.bidAsk.visible': true,
-            'mainSeriesProperties.bidAsk.lineStyle': 1,
+            'mainSeriesProperties.bidAsk.lineStyle': 2,
             'mainSeriesProperties.bidAsk.lineWidth': 1,
-            'mainSeriesProperties.bidAsk.bidLineColor': '#ef4444',
-            'mainSeriesProperties.bidAsk.askLineColor': '#2563eb',
+            'mainSeriesProperties.bidAsk.bidLineColor': '#1E88E5',
+            'mainSeriesProperties.bidAsk.askLineColor': '#EF4444',
             'scalesProperties.showBidAskLabels': true,
             'scalesProperties.showSeriesLastValue': true,
             'mainSeriesProperties.showCountdown': true,
@@ -3143,6 +3385,9 @@
           window.__tvBridgeReady = true;
           syncChartApiServerTime();
           triggerCountdownTick();
+          if (window.__nativeBidAskLines) {
+            window.__nativeBidAskLines.init();
+          }
           hideChartLegend();
           hideNativeTradingButtons();
           removeDefaultVolumeIndicator();
@@ -3159,10 +3404,10 @@
                 'mainSeriesProperties.statusViewStyle.showInterval': false,
                 'mainSeriesProperties.showPriceLine': true,
                 'mainSeriesProperties.bidAsk.visible': true,
-                'mainSeriesProperties.bidAsk.lineStyle': 1,
+                'mainSeriesProperties.bidAsk.lineStyle': 2,
                 'mainSeriesProperties.bidAsk.lineWidth': 1,
-                'mainSeriesProperties.bidAsk.bidLineColor': '#ef4444',
-                'mainSeriesProperties.bidAsk.askLineColor': '#2563eb',
+                'mainSeriesProperties.bidAsk.bidLineColor': '#1E88E5',
+                'mainSeriesProperties.bidAsk.askLineColor': '#EF4444',
                 'scalesProperties.showBidAskLabels': true,
                 'scalesProperties.showSeriesLastValue': true,
                 'mainSeriesProperties.showCountdown': true,
@@ -3171,15 +3416,96 @@
                 'tradingProperties.positionPL.visibility': true,
                 'tradingProperties.positionPL.display': 0,
               });
+              try {
+                var ms = readyChart.model && readyChart.model().mainSeries && readyChart.model().mainSeries();
+                if (ms && ms.properties) {
+                  var p = ms.properties().childs();
+                  if (p.showCountdown && typeof p.showCountdown.setValue === 'function') {
+                    p.showCountdown.setValue(true);
+                  }
+                  if (p.bidAsk && p.bidAsk.childs) {
+                    var ba = p.bidAsk.childs();
+                    if (ba.visible && typeof ba.visible.setValue === 'function') ba.visible.setValue(true);
+                    if (ba.bidLineColor && typeof ba.bidLineColor.setValue === 'function') ba.bidLineColor.setValue('#1E88E5');
+                    if (ba.askLineColor && typeof ba.askLineColor.setValue === 'function') ba.askLineColor.setValue('#EF4444');
+                  }
+                }
+                if (ms && ms._priceAxisView) {
+                  if (ms._priceAxisView._options) {
+                    ms._priceAxisView._options.showCountdown = true;
+                  }
+                  var origCountdown = typeof ms._priceAxisView._countdownText === 'function' ? ms._priceAxisView._countdownText.bind(ms._priceAxisView) : null;
+                  ms._priceAxisView._countdownText = function () {
+                    var txt = origCountdown ? origCountdown() : '';
+                    if (txt) return txt;
+                    try {
+                      var res = ms.interval();
+                      var intervalMs = getIntervalMs(res);
+                      if (!intervalMs || intervalMs >= 86400000) return '';
+                      var nowMs = Date.now() + brokerTimeOffsetMs;
+                      var nextClose = Math.ceil(nowMs / intervalMs) * intervalMs;
+                      var diffSec = Math.max(0, Math.round((nextClose - nowMs) / 1000));
+                      var mins = Math.floor(diffSec / 60);
+                      var secs = diffSec % 60;
+                      var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+                      if (mins >= 60) {
+                        var hrs = Math.floor(mins / 60);
+                        mins = mins % 60;
+                        return pad(hrs) + ':' + pad(mins) + ':' + pad(secs);
+                      }
+                      return pad(mins) + ':' + pad(secs);
+                    } catch (_) {
+                      return '';
+                    }
+                  };
+                }
+              } catch (_) {}
             }
             if (typeof widget.applyOverrides === 'function') {
               widget.applyOverrides({
                 'paneProperties.background': initialBackground,
                 'paneProperties.backgroundType': 'solid',
                 'scalesProperties.backgroundColor': initialBackground,
+                'mainSeriesProperties.bidAsk.visible': true,
+                'mainSeriesProperties.bidAsk.lineStyle': 2,
+                'mainSeriesProperties.bidAsk.lineWidth': 1,
+                'mainSeriesProperties.bidAsk.bidLineColor': '#1E88E5',
+                'mainSeriesProperties.bidAsk.askLineColor': '#EF4444',
+                'scalesProperties.showBidAskLabels': true,
+                'mainSeriesProperties.showCountdown': true,
               });
             }
           } catch (_) {}
+
+          setTimeout(function () {
+            try {
+              var innerWin = getChartInnerWindow();
+              var activeWidget = innerWin && innerWin.chartWidgetCollection && innerWin.chartWidgetCollection.activeChartWidget && innerWin.chartWidgetCollection.activeChartWidget().value();
+              var model = activeWidget && activeWidget.model && activeWidget.model();
+              var hasCustom = model && model.hasCustomSource && model.hasCustomSource('bidask');
+              var customSource = model && model.customSourceForName && model.customSourceForName('bidask');
+              var bp = customSource && customSource.getPrice && customSource.getPrice(0);
+              var ap = customSource && customSource.getPrice && customSource.getPrice(1);
+              var ms = model && model.mainSeries && model.mainSeries();
+              var p = ms && ms.properties && ms.properties().childs();
+              var baVisible = p && p.bidAsk && p.bidAsk.childs && p.bidAsk.childs().visible && p.bidAsk.childs().visible.value();
+              var scLabels = model && model.properties && model.properties().childs().scalesProperties.childs().showBidAskLabels.value();
+              postToNative({
+                type: 'BIDASK_DIAGNOSTIC',
+                payload: {
+                  hasCustom: hasCustom,
+                  hasSource: !!customSource,
+                  bidPrice: bp,
+                  askPrice: ap,
+                  baVisible: baVisible,
+                  scLabels: scLabels,
+                  brokerSubsCount: Object.keys(brokerRealtimeSubscribers).length,
+                }
+              });
+            } catch (err) {
+              postToNative({ type: 'BIDASK_DIAGNOSTIC', payload: { error: String(err) } });
+            }
+          }, 1500);
           if (!window.__hideTvTradingButtonsTimer) {
             window.__hideTvTradingButtonsTimer = setInterval(function () {
               hideChartLegend();
@@ -3232,6 +3558,9 @@
               updateBrokerOffset(lastBar.time, interval);
             }
             triggerCountdownTick();
+            if (window.__nativeBidAskLines) {
+              window.__nativeBidAskLines.init();
+            }
             postToNative({
               type: 'INTERVAL_CHANGED',
               payload: { resolution: interval },

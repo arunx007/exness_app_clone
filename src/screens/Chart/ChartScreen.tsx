@@ -23,10 +23,16 @@ import {
   ModifyOrderModal,
   OneClickTradingModal,
   OrderExecutionModal,
+  SymbolPickerModal,
   NewOrderPayload,
 } from '../../components/modals';
 import { PositionOrder } from '../../components/cards/OrderCard';
 import { TradingViewChart } from '../../components/chart/TradingViewChart';
+import { SymbolIcon } from '../../components/common/SymbolIcon';
+import { DEFAULT_CATALOG_SYMBOLS } from '../../constants/symbolsCatalog';
+import { marketSymbolsMatch } from '../../utils/symbol';
+
+import { useMarketQuotes } from '../../hooks/useMarketQuotes';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -35,42 +41,40 @@ interface ChartScreenProps {
   onClose?: () => void;
 }
 
-// Realistic candlestick data structure
-interface Candle {
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-const INITIAL_CANDLES: Candle[] = [
-  { time: '13:30', open: 84400, high: 84600, low: 84150, close: 84250 },
-  { time: '13:45', open: 84250, high: 84300, low: 83800, close: 83900 },
-  { time: '14:00', open: 83900, high: 84150, low: 83700, close: 83800 },
-  { time: '14:15', open: 83800, high: 84050, low: 83500, close: 83650 },
-  { time: '14:30', open: 83650, high: 83900, low: 83400, close: 83450 },
-  { time: '14:45', open: 83450, high: 83800, low: 83300, close: 83750 },
-  { time: '15:00', open: 83750, high: 84100, low: 83650, close: 84000 },
-  { time: '15:15', open: 84000, high: 84150, low: 83750, close: 83850 },
-  { time: '15:30', open: 83850, high: 83950, low: 83550, close: 83600 },
-  { time: '15:45', open: 83600, high: 83850, low: 83350, close: 83400 },
-  { time: '16:00', open: 83400, high: 84050, low: 83380, close: 83950 },
-  { time: '16:15', open: 83950, high: 84100, low: 83700, close: 83800 },
-  { time: '16:30', open: 83800, high: 83900, low: 83600, close: 83700 },
-  { time: '16:45', open: 83700, high: 83850, low: 83550, close: 83820 },
-  { time: '17:00', open: 83820, high: 83950, low: 83650, close: 83750 },
-  { time: '17:15', open: 83750, high: 83880, low: 83680, close: 83751.82 },
-];
-
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1D'];
 
 export const ChartScreen: React.FC<ChartScreenProps> = ({
-  symbol = 'BTC',
+  symbol = 'BTCUSD',
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
+
+  // Dynamic instrument symbol state
+  const [currentSymbol, setCurrentSymbol] = useState(symbol || 'BTCUSD');
+  const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+
+  useEffect(() => {
+    if (symbol && symbol !== currentSymbol) {
+      setCurrentSymbol(symbol);
+    }
+  }, [symbol]);
+
+  const catalogEntry = useMemo(() => {
+    return (
+      DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, currentSymbol)) ??
+      DEFAULT_CATALOG_SYMBOLS[0]
+    );
+  }, [currentSymbol]);
+
+  const digits = catalogEntry.digits ?? 2;
+  const spread = catalogEntry.spread ?? (digits === 5 ? 0.00015 : 10.0);
+  const [bidPrice, setBidPrice] = useState(catalogEntry.bid);
+  const askPrice = parseFloat((bidPrice + spread).toFixed(digits));
+
+  useEffect(() => {
+    setBidPrice(catalogEntry.bid);
+  }, [catalogEntry]);
 
   // State
   const [oneClickEnabled, setOneClickEnabled] = useState(false);
@@ -144,9 +148,6 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     return positions.filter((p) => p.profit > 0).length;
   }, [positions]);
 
-  // Live prices
-  const [bidPrice, setBidPrice] = useState(83751.82);
-  const askPrice = parseFloat((bidPrice + 10.0).toFixed(2));
   const primaryPosition = positions[0];
   const orderPnl = primaryPosition
     ? `${primaryPosition.profit >= 0 ? '+' : ''}${primaryPosition.profit.toFixed(2)}`
@@ -202,15 +203,16 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   const handleSellPress = async () => {
     if (oneClickEnabled) {
       await placeMarketOrder({
-        symbol: symbol || 'BTCUSD',
+        symbol: currentSymbol,
         side: 'SELL',
         volume: tradingLots,
       });
     } else {
+      const tick = Math.pow(10, -digits) * 15;
       setOrderExecutionModal({
         visible: true,
         orderType: 'Sell',
-        pendingPrice: parseFloat((bidPrice - 160.0).toFixed(2)),
+        pendingPrice: parseFloat((bidPrice - tick).toFixed(digits)),
         pendingType: 'Sell Stop',
         isPending: false,
         lots: tradingLots,
@@ -221,15 +223,16 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   const handleBuyPress = async () => {
     if (oneClickEnabled) {
       await placeMarketOrder({
-        symbol: symbol || 'BTCUSD',
+        symbol: currentSymbol,
         side: 'BUY',
         volume: tradingLots,
       });
     } else {
+      const tick = Math.pow(10, -digits) * 15;
       setOrderExecutionModal({
         visible: true,
         orderType: 'Buy',
-        pendingPrice: parseFloat((askPrice + 160.0).toFixed(2)),
+        pendingPrice: parseFloat((askPrice + tick).toFixed(digits)),
         pendingType: 'Buy Stop',
         isPending: false,
         lots: tradingLots,
@@ -291,183 +294,104 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Live Market Tick Simulation
+  // Stream live real-time market quotes directly from MT5 socket
+  const marketQuotes = useMarketQuotes([currentSymbol]);
   useEffect(() => {
-    const interval = setInterval(() => {
-      const tick = Math.random() * 4 - 2;
-      setBidPrice((prev) => parseFloat((prev + tick).toFixed(2)));
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const openOrderData: PositionOrder = {
-    id: 'ord-btc-active',
-    symbol: 'BTC',
-    type: 'Buy',
-    lot: 0.01,
-    openPrice: '83954.32',
-    currentPrice: bidPrice.toFixed(2),
-    pnl: orderPnl,
-    isProfit: parseFloat(orderPnl) >= 0,
-  };
-
-  // Dimensions for Chart Area
-  const chartHeight = 440;
-  const priceAxisWidth = 68;
-  const chartWidth = SCREEN_WIDTH - priceAxisWidth;
-
-  const minPrice = 82800;
-  const maxPrice = 85000;
-  const priceRange = maxPrice - minPrice;
-
-  const getYForPrice = (p: number) => {
-    return chartHeight - ((p - minPrice) / priceRange) * chartHeight;
-  };
-
-  const candleSlotWidth = chartWidth / INITIAL_CANDLES.length;
-  const candleBodyWidth = Math.max(candleSlotWidth * 0.6, 5);
-
-  const activeOpenPrice = activeOrders.length > 0 ? parseFloat(activeOrders[0].openPrice) : 83954.32;
-  const orderLineY = getYForPrice(activeOpenPrice);
-  const currentBidY = getYForPrice(bidPrice);
-  const previewPrice = orderExecutionModal.isPending
-    ? orderExecutionModal.pendingPrice
-    : orderExecutionModal.orderType === 'Buy'
-    ? askPrice
-    : bidPrice;
-  const previewLineY = getYForPrice(previewPrice);
+    const live = marketQuotes[currentSymbol] || Object.values(marketQuotes)[0];
+    if (live && live.bid > 0) {
+      setBidPrice(live.bid);
+    }
+  }, [marketQuotes, currentSymbol]);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { paddingTop: orderExecutionModal.visible ? Math.max(insets.top, 8) : insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* TOP PULL-DOWN HANDLE */}
-      <View style={styles.topHandleContainer}>
-        <View style={styles.topHandle} />
-      </View>
+      {/* TOP PULL-DOWN HANDLE & HEADER: Hidden when sheet is open because of limited vertical space */}
+      {!orderExecutionModal.visible && (
+        <>
+          <View style={styles.topHandleContainer}>
+            <View style={styles.topHandle} />
+          </View>
 
-      {/* HEADER BAR (Row 1): One-click switch | Account Capsule | Settings & Close */}
-      {/* HEADER BAR */}
-      {orderExecutionModal.visible ? (
-        /* Image 3: Minimal Header when sheet is open */
-        <View style={styles.headerBarSheetOpen}>
-          <TouchableOpacity style={styles.sheetHeaderSymbolBadge} activeOpacity={0.7}>
-            <View style={styles.symbolIconCircle}>
-              <Text style={styles.symbolIconText}>₿</Text>
-            </View>
-            <Text style={styles.sheetHeaderSymbolText}>{symbol || 'BTC'}</Text>
-            <Ionicons name="chevron-down" size={14} color="#111827" style={{ marginLeft: 3 }} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.accountCapsule}
-            activeOpacity={0.8}
-            onPress={() => setShowSwitchAccount(true)}
-          >
-            <View
-              style={[
-                styles.demoChip,
-                activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.demoChipText,
-                  activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
-                ]}
-              >
-                {activeAccount.type}
-              </Text>
-            </View>
-
-            <Text style={styles.balanceText} numberOfLines={1}>
-              {activeAccount.balance} USD :
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        /* Image 1 & 2: Regular Header */
-        <View style={styles.headerBar}>
-          {/* Left: One-Click Trading Toggle Switch */}
-          <View style={styles.oneClickLeftContainer}>
+          {/* HEADER BAR (Row 1): Dynamic Symbol | Account Capsule | One-Click switch & Close */}
+          <View style={styles.headerBar}>
+            {/* Left: Dynamic Symbol selector with Icon + Name + Chevron */}
             <TouchableOpacity
-              style={[
-                styles.oneClickSwitchTrack,
-                oneClickEnabled && styles.oneClickSwitchTrackActive,
-              ]}
+              style={styles.symbolSelectorBtn}
+              activeOpacity={0.7}
+              onPress={() => setShowSymbolPicker(true)}
+            >
+              <SymbolIcon symbol={currentSymbol} size={28} />
+              <Text style={styles.symbolSelectorText}>
+                {currentSymbol.includes('.') ? currentSymbol.split('.')[0] : currentSymbol}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color="#111827" style={{ marginLeft: 3 }} />
+            </TouchableOpacity>
+
+            {/* Center: Account Capsule */}
+            <TouchableOpacity
+              style={styles.accountCapsule}
               activeOpacity={0.8}
-              onPress={handleToggleOneClick}
+              onPress={() => setShowSwitchAccount(true)}
             >
               <View
                 style={[
-                  styles.oneClickSwitchThumb,
-                  oneClickEnabled && styles.oneClickSwitchThumbActive,
+                  styles.demoChip,
+                  activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
                 ]}
               >
-                <Ionicons
-                  name="flash"
-                  size={12}
-                  color={oneClickEnabled ? '#5E7182' : '#9CA3AF'}
-                />
+                <Text
+                  style={[
+                    styles.demoChipText,
+                    activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
+                  ]}
+                >
+                  {activeAccount.type}
+                </Text>
               </View>
-            </TouchableOpacity>
 
-            {!oneClickEnabled && (
-              <Text style={styles.oneClickLabelText}>One-click</Text>
-            )}
-          </View>
-
-          {/* Center: Account Capsule */}
-          <TouchableOpacity
-            style={styles.accountCapsule}
-            activeOpacity={0.8}
-            onPress={() => setShowSwitchAccount(true)}
-          >
-            <View
-              style={[
-                styles.demoChip,
-                activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.demoChipText,
-                  activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
-                ]}
-              >
-                {activeAccount.type}
+              <Text style={styles.balanceText} numberOfLines={1}>
+                {activeAccount.balance} USD :
               </Text>
-            </View>
-
-            <Text style={styles.balanceText} numberOfLines={1}>
-              {activeAccount.balance} USD :
-            </Text>
-          </TouchableOpacity>
-
-          {/* Right Actions */}
-          <View style={styles.headerRightActions}>
-            {!oneClickEnabled && (
-              <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-                <Ionicons name="time-outline" size={21} color="#111827" />
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-              <Ionicons name="settings-outline" size={21} color="#111827" />
             </TouchableOpacity>
 
-            {onClose && (
+            {/* Right Actions: One-Click Toggle & Close Button */}
+            <View style={styles.headerRightActions}>
               <TouchableOpacity
-                onPress={onClose}
-                style={[styles.headerIconBtn, { marginLeft: 2 }]}
-                activeOpacity={0.7}
+                style={[
+                  styles.oneClickSwitchTrack,
+                  oneClickEnabled && styles.oneClickSwitchTrackActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={handleToggleOneClick}
               >
-                <Ionicons name="close" size={22} color="#111827" />
+                <View
+                  style={[
+                    styles.oneClickSwitchThumb,
+                    oneClickEnabled && styles.oneClickSwitchThumbActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="flash"
+                    size={11}
+                    color={oneClickEnabled ? '#5E7182' : '#9CA3AF'}
+                  />
+                </View>
               </TouchableOpacity>
-            )}
+
+              {onClose && (
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={[styles.headerIconBtn, { marginLeft: 6 }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close" size={22} color="#111827" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        </View>
+        </>
       )}
 
       {/* FLOATING ORDERS SUMMARY BAR (Row 2 - Hidden when sheet is open) */}
@@ -493,7 +417,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                   { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
                 ]}
               >
-                {parseFloat(orderPnl) >= 0 ? `+${orderPnl}` : orderPnl} USD
+                {orderPnl} USD
               </Text>
             </TouchableOpacity>
 
@@ -573,7 +497,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                   { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
                 ]}
               >
-                {parseFloat(orderPnl) >= 0 ? `+${orderPnl}` : orderPnl} USD
+                {orderPnl} USD
               </Text>
               <TouchableOpacity
                 style={styles.disabledCloseIconBtn}
@@ -587,58 +511,11 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
         )
       )}
 
-      {/* CHART TOOLBAR (Row 3): Hidden when sheet is open */}
-      {!orderExecutionModal.visible && (
-        <View style={styles.chartToolbar}>
-          {/* Left icon: sidebar toggle */}
-          <TouchableOpacity style={styles.toolbarBtn}>
-            <Ionicons name="chevron-back-outline" size={17} color="#4B5563" />
-          </TouchableOpacity>
-
-          {/* Timeframe Button */}
-          <TouchableOpacity
-            style={styles.timeframeBtn}
-            onPress={() => setShowTimeframePicker(!showTimeframePicker)}
-          >
-            <Text style={styles.timeframeText}>{selectedTimeframe}</Text>
-          </TouchableOpacity>
-
-        {/* Candlestick type icon */}
-        <TouchableOpacity style={styles.toolbarBtn}>
-          <Ionicons name="stats-chart-outline" size={17} color="#4B5563" />
-        </TouchableOpacity>
-
-        {/* Indicators fx icon */}
-        <TouchableOpacity style={styles.toolbarBtn}>
-          <Text style={styles.fxText}>fx</Text>
-        </TouchableOpacity>
-
-        {/* Compare / Layout icon */}
-        <TouchableOpacity style={styles.toolbarBtn}>
-          <Ionicons name="grid-outline" size={16} color="#4B5563" />
-        </TouchableOpacity>
-
-        {/* Divider */}
-        <View style={styles.toolbarDivider} />
-
-        {/* Undo / Redo Arrow */}
-        <TouchableOpacity style={styles.toolbarBtn}>
-          <Ionicons name="arrow-down-outline" size={16} color="#EF4444" />
-        </TouchableOpacity>
-
-        {/* Save Cloud / Button */}
-        <TouchableOpacity style={styles.saveContainer}>
-          <Text style={styles.saveTitle}>Save</Text>
-          <Text style={styles.saveSubtitle}>Save</Text>
-        </TouchableOpacity>
-      </View>
-      )}
-
       {/* DEDICATED TRADINGVIEW CHART CONTAINER AREA */}
       <View style={styles.tradingViewChartContainer}>
         {/* Real Interactive TradingView Chart */}
         <TradingViewChart
-          symbol={symbol || 'BTCUSD'}
+          symbol={currentSymbol}
           resolution={
             selectedTimeframe === '1m'
               ? '1'
@@ -919,7 +796,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       <OrderExecutionModal
         visible={orderExecutionModal.visible}
         orderType={orderExecutionModal.orderType}
-        symbol={symbol || 'BTC'}
+        symbol={currentSymbol}
         currentMarketPrice={orderExecutionModal.orderType === 'Buy' ? askPrice : bidPrice}
         initialLots={tradingLots}
         leverage={400}
@@ -984,6 +861,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 14,
     paddingVertical: 4,
+  },
+  symbolSelectorBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  symbolSelectorText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
   },
   oneClickSwitchTrack: {
     width: 48,

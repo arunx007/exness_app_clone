@@ -78,18 +78,20 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     resolutionRef.current = resolution;
   }, [resolution]);
 
-  // Construct chart URL
+  const initialResolutionRef = useRef(resolution);
+
+  // Construct chart URL (uses initial resolution so switching timeframe never forces a full reload)
   const chartUri = useMemo(
     () =>
       getTradingViewChartUri({
         symbol: chartSymbol,
         tradingSymbol,
-        interval: resolution,
+        interval: initialResolutionRef.current,
         theme: 'light',
         background: '#FFFFFF',
         serverTimeOffset: chartSocket.getBrokerOffsetMs(),
       }),
-    [chartSymbol, tradingSymbol, resolution],
+    [chartSymbol, tradingSymbol],
   );
 
   // Synchronize open positions and pending orders for broker lines
@@ -234,10 +236,11 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
     const now = Date.now();
     const intervalMs = socketTimeframeToMs(resolutionToSocketTimeframe(res)) || 300_000;
+    const currentBucket = Math.floor(now / intervalMs) * intervalMs;
     const volatility = Math.max(currentPrice * 0.0006, 0.0001);
 
     for (let i = 120; i >= 0; i--) {
-      const time = now - i * intervalMs;
+      const time = currentBucket - i * intervalMs;
       const delta = (Math.random() - 0.495) * volatility;
       const open = currentPrice;
       const close = Math.max(open + delta, 0.00001);
@@ -294,6 +297,52 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     requestHistory(resolutionRef.current);
     return () => chartSocket.disconnect();
   }, [requestHistory, tradingSymbol]);
+
+  // Handle external resolution changes (e.g. from React Native UI)
+  useEffect(() => {
+    if (readyRef.current && resolutionRef.current !== resolution) {
+      resolutionRef.current = resolution;
+      injectBridgeCall(
+        `(function(){
+          try {
+            var tv = window.tvWidget;
+            var c = tv && tv.activeChart && tv.activeChart();
+            if (c && typeof c.setResolution === 'function' && c.resolution() !== ${JSON.stringify(resolution)}) {
+              c.setResolution(${JSON.stringify(resolution)});
+            }
+          } catch(e){}
+        })();`,
+      );
+      requestHistory(resolution);
+    }
+  }, [resolution, injectBridgeCall, requestHistory]);
+
+  // Handle external symbol changes (e.g. when user picks ETHUSD, XAUUSD, etc.)
+  const lastSymbolRef = useRef(tradingSymbol);
+  useEffect(() => {
+    if (readyRef.current && lastSymbolRef.current !== tradingSymbol) {
+      lastSymbolRef.current = tradingSymbol;
+      injectBridgeCall(
+        `(function(){
+          try {
+            var tv = window.tvWidget;
+            var c = tv && tv.activeChart && tv.activeChart();
+            if (c && typeof c.setSymbol === 'function') {
+              c.setSymbol(${JSON.stringify(chartSymbol)});
+            }
+          } catch(e){}
+        })();`,
+      );
+      const seedCandles = generateFallbackCandles(resolutionRef.current);
+      pushHistory(seedCandles, resolutionRef.current);
+      const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
+      const upper = tradingSymbol.toUpperCase();
+      const initBid = matched?.bid ?? (upper.includes('BTC') ? 84100 : 2600);
+      const initSpread = matched?.spread ?? (upper.includes('BTC') ? 10 : 0.05);
+      pushQuote({ symbol: tradingSymbol, bid: initBid, ask: initBid + initSpread, time: Date.now() });
+      requestHistory(resolutionRef.current);
+    }
+  }, [chartSymbol, generateFallbackCandles, injectBridgeCall, pushHistory, pushQuote, requestHistory, tradingSymbol]);
 
   // Reply back to WebView bridge
   const reply = useCallback(
@@ -407,6 +456,13 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
           const fallback = generateFallbackCandles(resolutionRef.current);
           pushHistory(fallback, resolutionRef.current);
         }
+
+        // Push initial quote immediately so TradingView Ask/Bid lines appear at once
+        const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
+        const upper = tradingSymbol.toUpperCase();
+        const initBid = matched?.bid ?? (upper.includes('BTC') ? 84100 : 2600);
+        const initSpread = matched?.spread ?? (upper.includes('BTC') ? 10 : 0.05);
+        pushQuote({ symbol: tradingSymbol, bid: initBid, ask: initBid + initSpread, time: Date.now() });
 
         pushTradingSync();
         return;

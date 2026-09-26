@@ -490,10 +490,7 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
 
 const styles = StyleSheet.create({
   sheetContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    width: '100%',
     zIndex: 999,
   },
   bottomSheet: {
