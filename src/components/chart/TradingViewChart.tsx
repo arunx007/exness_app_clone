@@ -219,53 +219,50 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     [chartSymbol, injectBridgeCall, onLiveQuote],
   );
 
-  // Generate high quality candles matching instrument price scale and resolution
-  const generateFallbackCandles = useCallback((res: string): ChartCandle[] => {
+  // Generate smooth fallback candles anchored backwards from the current price
+  const generateFallbackCandles = useCallback((res: string, anchorPrice?: number): ChartCandle[] => {
     const bars: ChartCandle[] = [];
     const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
     const upper = tradingSymbol.toUpperCase();
-    let currentPrice = matched?.bid ?? (
-      upper.includes('BTC') ? 83890.0 :
+    const endPrice = (anchorPrice && anchorPrice > 0) ? anchorPrice : (matched?.bid ?? (
+      upper.includes('BTC') ? 83915.0 :
       upper.includes('ETH') ? 2685.0 :
       upper.includes('SOL') ? 120.4 :
       upper.includes('XAU') ? 2654.8 :
       upper.includes('XAG') ? 31.4 :
       upper.includes('JPY') ? 154.2 :
       1.0845
-    );
+    ));
 
     const now = Date.now();
     const intervalMs = socketTimeframeToMs(resolutionToSocketTimeframe(res)) || 300_000;
     const currentBucket = Math.floor(now / intervalMs) * intervalMs;
-    const volatility = Math.max(currentPrice * 0.0006, 0.0001);
+    const volatility = Math.max(endPrice * 0.0004, 0.0001);
 
-    for (let i = 120; i >= 0; i--) {
+    // Build bars from newest (index 0 = now) to oldest, so the LAST bar ends precisely at endPrice
+    let price = endPrice;
+    for (let i = 0; i <= 80; i++) {
       const time = currentBucket - i * intervalMs;
-      const delta = (Math.random() - 0.495) * volatility;
-      const open = currentPrice;
-      const close = Math.max(open + delta, 0.00001);
-      const high = Math.max(open, close) + Math.random() * (volatility * 0.6);
-      const low = Math.min(open, close) - Math.random() * (volatility * 0.6);
-      bars.push({ time, open, high, low, close });
-      currentPrice = close;
+      const prevPrice = price + (Math.random() - 0.5) * volatility;
+      const open = prevPrice;
+      const close = price;
+      const high = Math.max(open, close) + Math.random() * (volatility * 0.4);
+      const low = Math.min(open, close) - Math.random() * (volatility * 0.4);
+      bars.unshift({ time, open, high, low, close });
+      price = prevPrice;
     }
     return bars;
   }, [tradingSymbol]);
 
   const requestHistory = useCallback(
     (targetResolution: string) => {
-      // 1. Immediately seed bars so TradingView getBars resolves instantly (0ms lag)
-      const seedCandles = generateFallbackCandles(targetResolution);
-      if (pageActiveRef.current) {
-        pushHistory(seedCandles, targetResolution);
-      } else {
-        pendingHistoryRef.current = { candles: seedCandles, resolution: targetResolution };
-      }
+      let historyReceived = false;
 
-      // 2. Connect to live broker socket for live ticks and real candles
+      // 1. Connect to live broker socket for real MT5 candles and live ticks
       chartSocket.connect(tradingSymbol, targetResolution, {
         onHistory: (candles) => {
           if (candles && candles.length > 0) {
+            historyReceived = true;
             if (pageActiveRef.current) pushHistory(candles, targetResolution);
             else pendingHistoryRef.current = { candles, resolution: targetResolution };
           }
@@ -276,10 +273,23 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         onQuote: (quote) => {
           if (pageActiveRef.current) pushQuote(quote);
         },
+        onStatusChange: setSocketStatus,
         onError: () => {
           setSocketStatus((curr) => (curr === 'connected' ? 'disconnected' : curr));
         },
       });
+
+      // 2. Fallback timeout: only if socket history didn't arrive, seed smoothly
+      setTimeout(() => {
+        if (!historyReceived && !pendingHistoryRef.current) {
+          const seedCandles = generateFallbackCandles(targetResolution);
+          if (pageActiveRef.current) {
+            pushHistory(seedCandles, targetResolution);
+          } else {
+            pendingHistoryRef.current = { candles: seedCandles, resolution: targetResolution };
+          }
+        }
+      }, 700);
     },
     [generateFallbackCandles, pushHistory, pushQuote, pushUpdate, tradingSymbol],
   );

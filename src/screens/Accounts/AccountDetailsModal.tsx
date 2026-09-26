@@ -193,7 +193,7 @@ export const AccountDetailsModal: React.FC<AccountDetailsModalProps> = ({
                 <Text style={styles.rowLabel}>Type</Text>
                 <View style={styles.chipsRow}>
                   <View style={styles.chipPill}>
-                    <Text style={styles.chipText}>Exness</Text>
+                    <Text style={styles.chipText}>Broker Bros</Text>
                   </View>
                   <View style={styles.chipPill}>
                     <Text style={styles.chipText}>Standard</Text>
@@ -245,8 +245,8 @@ export const AccountDetailsModal: React.FC<AccountDetailsModalProps> = ({
               </TouchableOpacity>
             </View>
 
-            {/* TRADING PLATFORM - EXNESS Section */}
-            <Text style={styles.sectionHeader}>TRADING PLATFORM – EXNESS</Text>
+            {/* TRADING PLATFORM - BROKER BROS Section */}
+            <Text style={styles.sectionHeader}>TRADING PLATFORM – BROKER BROS</Text>
             <TouchableOpacity style={styles.tradingLogCard} activeOpacity={0.7}>
               <Text style={styles.tradingLogText}>Trading log</Text>
               <Ionicons name="chevron-forward" size={20} color="#111827" />
@@ -257,7 +257,7 @@ export const AccountDetailsModal: React.FC<AccountDetailsModalProps> = ({
               <View style={styles.noticeTopRow}>
                 <Ionicons name="information-circle-outline" size={22} color="#0284C7" style={{ marginRight: 10 }} />
                 <Text style={styles.noticeText}>
-                  This account works only on Exness Terminal and Exness Trade app.
+                  This account works on Broker Bros Terminal and Broker Bros App.
                 </Text>
               </View>
               <TouchableOpacity style={styles.switchMt5Btn} activeOpacity={0.7}>

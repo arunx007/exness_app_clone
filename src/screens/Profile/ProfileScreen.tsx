@@ -16,17 +16,17 @@ export const ProfileScreen: React.FC = () => {
     { icon: 'shield-checkmark-outline', title: 'Security & 2FA' },
     { icon: 'wallet-outline', title: 'Deposit & Withdrawal Methods' },
     { icon: 'document-text-outline', title: 'Trading Conditions & Spread' },
-    { icon: 'headset-outline', title: '24/7 Exness Support' },
+    { icon: 'headset-outline', title: '24/7 Broker Bros Support' },
   ];
 
   const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'Trader Account';
-  const displayEmail = user?.email || 'user@exness.com';
+  const displayEmail = user?.email || 'support@broker-bros.com';
   const initials = displayName
     .split(' ')
     .map((w) => w[0])
     .join('')
     .slice(0, 2)
-    .toUpperCase() || 'EX';
+    .toUpperCase() || 'BB';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>

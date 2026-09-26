@@ -406,7 +406,7 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             volume: params.volume,
             stopLoss: params.stopLoss,
             takeProfit: params.takeProfit,
-            comment: params.comment || 'Exness Mobile',
+            comment: params.comment || 'Broker Bros Mobile',
           });
         } catch (err) {
           console.warn('[TradingData] placeMarketOrder API error:', err);
@@ -455,7 +455,7 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             price: params.price,
             stopLoss: params.stopLoss,
             takeProfit: params.takeProfit,
-            comment: params.comment || 'Exness Mobile',
+            comment: params.comment || 'Broker Bros Mobile',
           });
         } catch (err) {
           console.warn('[TradingData] placePendingOrder API error:', err);

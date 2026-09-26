@@ -193,7 +193,7 @@ export const PasswordScreen: React.FC<PasswordScreenProps> = ({
 
               {/* Legal Text 1: Regulatory disclosure */}
               <Text style={styles.regulatorText}>
-                You are registering with Exness (SC) Ltd, regulated by the Seychelles FSA.
+                You are registering with Broker Bros Ltd, regulated by the Seychelles FSA.
               </Text>
 
               {/* Legal Text 2: Terms and Agreements with blue links */}

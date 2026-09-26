@@ -144,7 +144,7 @@ export const OpenAccountModal: React.FC<OpenAccountModalProps> = ({
       id: `acc-${Date.now()}`,
       accountNumber: newNumber,
       type: accountType,
-      server: 'Exness',
+      server: 'Broker Bros',
       plan: selectedPlan,
       balance: accountType === 'Demo' ? '10,000.00' : '0.00',
       currency: currency,

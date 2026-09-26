@@ -78,7 +78,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
           />
         </View>
 
-        <Text style={styles.footerText}>exness financial technologies</Text>
+        <Text style={styles.footerText}>broker bros financial technologies</Text>
       </View>
     </View>
   );

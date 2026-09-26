@@ -4,7 +4,7 @@ export const mockAccounts: TradingAccount[] = [
   {
     id: 'acc-1',
     accountNumber: '2984102',
-    server: 'Exness-Real19',
+    server: 'BrokerBros-Real1',
     platform: 'MT5',
     type: 'REAL',
     currency: 'USD',
@@ -17,7 +17,7 @@ export const mockAccounts: TradingAccount[] = [
   {
     id: 'acc-2',
     accountNumber: '7104921',
-    server: 'Exness-Trial',
+    server: 'BrokerBros-Trial',
     platform: 'MT5',
     type: 'DEMO',
     currency: 'USD',
