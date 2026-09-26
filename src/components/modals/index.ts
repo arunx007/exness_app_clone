@@ -8,3 +8,4 @@ export * from './ChartOrdersModal';
 export * from './VerifyContactDetailsModal';
 export * from './AccountSwitchOverlay';
 export * from './Mt5PasswordLoginModal';
+export * from './OneClickTradingModal';

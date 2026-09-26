@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Rect, Text as SvgText, G } from 'react-native-svg';
 
+import * as SecureStore from 'expo-secure-store';
 import { useAccount } from '../../context/AccountContext';
 import {
   SwitchAccountModal,
@@ -19,6 +20,7 @@ import {
   ClosePositionModal,
   ChartOrdersModal,
   ModifyOrderModal,
+  OneClickTradingModal,
 } from '../../components/modals';
 import { PositionOrder } from '../../components/cards/OrderCard';
 
@@ -68,10 +70,48 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
 
   // State
   const [oneClickEnabled, setOneClickEnabled] = useState(false);
+  const [showOneClickModal, setShowOneClickModal] = useState(false);
+  const [dontShowOneClickModal, setDontShowOneClickModal] = useState(false);
   const [selectedTimeframe, setSelectedTimeframe] = useState('5m');
   const [showTimeframePicker, setShowTimeframePicker] = useState(false);
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
   const [showOpenAccount, setShowOpenAccount] = useState(false);
+
+  // Load "Don't show again" preference for One-click trading modal
+  useEffect(() => {
+    SecureStore.getItemAsync('one_click_dont_show_again')
+      .then((val) => {
+        if (val === 'true') {
+          setDontShowOneClickModal(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleOneClick = () => {
+    if (!oneClickEnabled) {
+      if (dontShowOneClickModal) {
+        setOneClickEnabled(true);
+      } else {
+        setShowOneClickModal(true);
+      }
+    } else {
+      setOneClickEnabled(false);
+    }
+  };
+
+  const handleEnableOneClick = async (dontShowAgain: boolean) => {
+    setOneClickEnabled(true);
+    setShowOneClickModal(false);
+    if (dontShowAgain) {
+      setDontShowOneClickModal(true);
+      try {
+        await SecureStore.setItemAsync('one_click_dont_show_again', 'true');
+      } catch (e) {
+        // ignore
+      }
+    }
+  };
 
   // Live prices
   const [bidPrice, setBidPrice] = useState(83751.82);
@@ -163,7 +203,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             oneClickEnabled && styles.oneClickCapsuleActive,
           ]}
           activeOpacity={0.8}
-          onPress={() => setOneClickEnabled(!oneClickEnabled)}
+          onPress={handleToggleOneClick}
         >
           <View
             style={[
@@ -634,6 +674,13 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           }
         }}
         onDismiss={() => setModifyingOrder(null)}
+      />
+
+      {/* One-Click Trading Info & Confirmation Modal */}
+      <OneClickTradingModal
+        visible={showOneClickModal}
+        onClose={() => setShowOneClickModal(false)}
+        onEnable={handleEnableOneClick}
       />
     </View>
   );
