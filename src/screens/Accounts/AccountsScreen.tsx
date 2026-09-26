@@ -519,25 +519,23 @@ export const AccountsScreen: React.FC = () => {
             currentOpenOrders.length > 0 ? (
               <View>
                 {/* Total P/L Row */}
-                <View style={styles.totalPnlRow}>
-                  <Text style={styles.totalPnlLabel}>Total P/L</Text>
-                  <Text
-                    style={[
-                      styles.totalPnlValue,
-                      {
-                        color:
-                          currentOpenOrders.reduce((sum, ord) => sum + parseFloat(ord.pnl), 0) >= 0
-                            ? '#10B981'
-                            : '#EF4444',
-                      },
-                    ]}
-                  >
-                    {currentOpenOrders
-                      .reduce((sum, ord) => sum + parseFloat(ord.pnl), 0)
-                      .toFixed(2)}{' '}
-                    USD
-                  </Text>
-                </View>
+                {(() => {
+                  const totalOpenPnl = currentOpenOrders.reduce((sum, ord) => sum + parseFloat(ord.pnl), 0);
+                  const isPos = totalOpenPnl >= 0;
+                  return (
+                    <View style={styles.totalPnlRow}>
+                      <Text style={styles.totalPnlLabel}>Total P/L</Text>
+                      <Text
+                        style={[
+                          styles.totalPnlValue,
+                          { color: isPos ? '#10B981' : '#EF4444' },
+                        ]}
+                      >
+                        {isPos ? '+' : ''}{totalOpenPnl.toFixed(2)} USD
+                      </Text>
+                    </View>
+                  );
+                })()}
 
                 {/* Order Cards */}
                 {currentOpenOrders.map((order) => (
@@ -592,15 +590,23 @@ export const AccountsScreen: React.FC = () => {
             currentClosedOrders.length > 0 ? (
               <View>
                 {/* Closed Orders */}
-                <View style={styles.totalPnlRow}>
-                  <Text style={styles.closedDateLabel}>Closed Orders</Text>
-                  <Text style={styles.closedPnlValue}>
-                    {currentClosedOrders
-                      .reduce((sum, ord) => sum + parseFloat(ord.pnl), 0)
-                      .toFixed(2)}{' '}
-                    USD
-                  </Text>
-                </View>
+                {(() => {
+                  const totalClosedPnl = currentClosedOrders.reduce((sum, ord) => sum + parseFloat(ord.pnl), 0);
+                  const isPos = totalClosedPnl >= 0;
+                  return (
+                    <View style={styles.totalPnlRow}>
+                      <Text style={styles.closedDateLabel}>Closed Orders</Text>
+                      <Text
+                        style={[
+                          styles.closedPnlValue,
+                          { color: isPos ? '#10B981' : '#EF4444' },
+                        ]}
+                      >
+                        {isPos ? '+' : ''}{totalClosedPnl.toFixed(2)} USD
+                      </Text>
+                    </View>
+                  );
+                })()}
 
                 {currentClosedOrders.map((order) => (
                   <TouchableOpacity
@@ -622,7 +628,14 @@ export const AccountsScreen: React.FC = () => {
                     </View>
 
                     <View style={styles.closedRightCol}>
-                      <Text style={styles.closedPnlText}>{order.pnl} USD</Text>
+                      <Text
+                        style={[
+                          styles.closedPnlText,
+                          { color: order.isProfit ? '#10B981' : '#EF4444' },
+                        ]}
+                      >
+                        {order.pnl} USD
+                      </Text>
                       <Text style={styles.closedPriceText}>{order.closePrice}</Text>
                     </View>
                   </TouchableOpacity>
@@ -1029,7 +1042,7 @@ const styles = StyleSheet.create({
   },
   totalPnlValue: {
     fontSize: 15,
-    color: '#EF4444',
+    color: '#10B981',
     fontWeight: '600',
   },
   closedDateLabel: {
@@ -1039,7 +1052,7 @@ const styles = StyleSheet.create({
   },
   closedPnlValue: {
     fontSize: 15,
-    color: '#EF4444',
+    color: '#10B981',
     fontWeight: '600',
   },
   closedCard: {
@@ -1083,7 +1096,7 @@ const styles = StyleSheet.create({
   closedPnlText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#EF4444',
+    color: '#10B981',
     marginBottom: 2,
   },
   closedPriceText: {

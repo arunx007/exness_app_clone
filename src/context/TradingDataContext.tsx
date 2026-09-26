@@ -12,6 +12,8 @@ import {
   mt5Session,
   marketSocket,
   marketSymbolsMatch,
+  tradingStream,
+  accountStream,
   type Mt5Position,
   type Mt5Order,
   type Mt5HistoryDeal,
@@ -19,6 +21,7 @@ import {
   type MarketTick,
   type OrderResult,
   type OrderType,
+  type OrderSide,
   ApiError,
   toErrorMessage,
 } from '../api';
@@ -73,6 +76,17 @@ const toOrderType = (t: string): OrderType => {
   return (t as OrderType) || 'BUY_LIMIT';
 };
 
+interface ServerPositionBaseline {
+  ticket: number;
+  openPrice: number;
+  serverPrice: number;
+  serverProfit: number;
+  swap: number;
+  commission: number;
+  volume: number;
+  type: OrderSide;
+}
+
 const INITIAL_DEMO_POSITIONS: Mt5Position[] = [
   {
     ticket: 7730671,
@@ -101,6 +115,31 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [error, setError] = useState<string | null>(null);
 
   const activeSymbolsRef = useRef<string[]>([]);
+  const positionsAuthoritative = useRef(false);
+  const ordersAuthoritative = useRef(false);
+  const streamConnectedRef = useRef(false);
+  const serverBaselinesRef = useRef<Map<number, ServerPositionBaseline>>(new Map());
+
+  const updateBaselines = useCallback((posList: Mt5Position[]) => {
+    const nextTickets = new Set(posList.map((p) => p.ticket));
+    for (const key of serverBaselinesRef.current.keys()) {
+      if (!nextTickets.has(key)) {
+        serverBaselinesRef.current.delete(key);
+      }
+    }
+    for (const pos of posList) {
+      serverBaselinesRef.current.set(pos.ticket, {
+        ticket: pos.ticket,
+        openPrice: pos.openPrice,
+        serverPrice: pos.currentPrice > 0 ? pos.currentPrice : pos.openPrice,
+        serverProfit: pos.profit,
+        swap: pos.swap ?? 0,
+        commission: pos.commission ?? 0,
+        volume: pos.volume,
+        type: pos.type,
+      });
+    }
+  }, []);
 
   const fetchTradingData = useCallback(async () => {
     if (!mt5Session.isAuthenticated()) {
@@ -119,8 +158,13 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       ]);
 
       if (nextProfile) setProfile(nextProfile);
-      setPositions(nextPositions);
-      setOrders(nextOrders);
+      if (!positionsAuthoritative.current || nextPositions.length > 0) {
+        updateBaselines(nextPositions);
+        setPositions(nextPositions);
+      }
+      if (!ordersAuthoritative.current || nextOrders.length > 0) {
+        setOrders(nextOrders);
+      }
       setHistory(nextHistory);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.kind === 'cancelled') return;
@@ -128,13 +172,104 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [updateBaselines]);
+
+  // Connect real-time SignalR streams for Trading and Account
+  useEffect(() => {
+    if (!mt5Session.isAuthenticated()) {
+      return;
+    }
+
+    void accountStream.start({
+      onProfile: (next) => setProfile(next),
+      onStatusChange: (status) => {
+        // Status handled silently
+      },
+      onError: (msg) => {
+        console.warn('[TradingData] accountStream warning:', msg);
+      },
+    });
+
+    void tradingStream.start({
+      onPositionsSnapshot: (next) => {
+        positionsAuthoritative.current = true;
+        updateBaselines(next);
+        setPositions(next);
+      },
+      onPositionUpsert: (position) => {
+        positionsAuthoritative.current = true;
+        serverBaselinesRef.current.set(position.ticket, {
+          ticket: position.ticket,
+          openPrice: position.openPrice,
+          serverPrice: position.currentPrice > 0 ? position.currentPrice : position.openPrice,
+          serverProfit: position.profit,
+          swap: position.swap ?? 0,
+          commission: position.commission ?? 0,
+          volume: position.volume,
+          type: position.type,
+        });
+        setPositions((current) => {
+          const idx = current.findIndex((p) => p.ticket === position.ticket);
+          if (idx >= 0) {
+            const next = [...current];
+            next[idx] = position;
+            return next;
+          }
+          return [position, ...current];
+        });
+      },
+      onPositionRemoved: (ticket) => {
+        positionsAuthoritative.current = true;
+        serverBaselinesRef.current.delete(ticket);
+        setPositions((current) => current.filter((p) => p.ticket !== ticket));
+      },
+      onOrdersSnapshot: (next) => {
+        ordersAuthoritative.current = true;
+        setOrders(next);
+      },
+      onOrderUpsert: (order) => {
+        ordersAuthoritative.current = true;
+        setOrders((current) => {
+          const idx = current.findIndex((o) => o.ticket === order.ticket);
+          if (idx >= 0) {
+            const next = [...current];
+            next[idx] = order;
+            return next;
+          }
+          return [order, ...current];
+        });
+      },
+      onOrderRemoved: (ticket) => {
+        ordersAuthoritative.current = true;
+        setOrders((current) => current.filter((o) => o.ticket !== ticket));
+      },
+      onStatusChange: (status) => {
+        streamConnectedRef.current = status === 'connected';
+        if (status === 'disconnected') {
+          positionsAuthoritative.current = false;
+          ordersAuthoritative.current = false;
+        }
+      },
+      onError: (msg) => {
+        console.warn('[TradingData] tradingStream warning:', msg);
+      },
+    });
+
+    return () => {
+      void accountStream.stop();
+      void tradingStream.stop();
+    };
+  }, [updateBaselines]);
 
   // When MT5 token changes (account switched or logged in), reload everything!
   useEffect(() => {
+    positionsAuthoritative.current = false;
+    ordersAuthoritative.current = false;
     fetchTradingData();
     const unsub = mt5Session.subscribe((tokens) => {
       if (tokens.accessToken) {
+        positionsAuthoritative.current = false;
+        ordersAuthoritative.current = false;
         setPositions([]);
         setOrders([]);
         setHistory([]);
@@ -160,18 +295,29 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setPositions((current) =>
           current.map((pos) => {
             if (marketSymbolsMatch(pos.symbol, tick.symbol)) {
-              const currentPrice = pos.type === 'BUY' ? tick.bid : tick.ask;
-              if (currentPrice > 0) {
-                // Calculate live approximate profit difference
-                const priceDiff =
-                  pos.type === 'BUY'
-                    ? currentPrice - pos.openPrice
-                    : pos.openPrice - currentPrice;
-                // Keep server profit if reliable, or adjust
+              const livePrice = pos.type === 'BUY' ? tick.bid : tick.ask;
+              if (livePrice > 0) {
+                const base = serverBaselinesRef.current.get(pos.ticket);
+                let liveProfit = pos.profit;
+                if (base) {
+                  const isBuy = base.type === 'BUY';
+                  const open = base.openPrice;
+                  const prevMark = base.serverPrice > 0 ? base.serverPrice : open;
+                  const prevMove = isBuy ? prevMark - open : open - prevMark;
+                  const nextMove = isBuy ? livePrice - open : open - livePrice;
+                  const floating = base.serverProfit - base.swap - base.commission;
+
+                  if (Math.abs(prevMove) > 1e-6) {
+                    liveProfit = floating * (nextMove / prevMove) + base.swap + base.commission;
+                  } else {
+                    // Direct point diff calculation
+                    liveProfit = base.serverProfit + nextMove * base.volume;
+                  }
+                }
                 return {
                   ...pos,
-                  currentPrice,
-                  profit: Number((pos.profit + priceDiff * 0.1).toFixed(2)),
+                  currentPrice: livePrice,
+                  profit: Number(liveProfit.toFixed(2)),
                 };
               }
             }
@@ -189,11 +335,13 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   }, [positions.map((p) => p.symbol).sort().join(',')]);
 
-  // Periodic background refresh every 15 seconds
+  // Periodic background fallback refresh (only when stream is not connected)
   useEffect(() => {
     if (!mt5Session.isAuthenticated()) return;
     const interval = setInterval(() => {
-      fetchTradingData();
+      if (!streamConnectedRef.current) {
+        fetchTradingData();
+      }
     }, 15000);
     return () => clearInterval(interval);
   }, [fetchTradingData]);

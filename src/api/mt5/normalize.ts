@@ -192,6 +192,22 @@ export function normalizeProfile(payload: unknown): Mt5Profile | null {
   };
 }
 
+export function mergeProfile(base: Mt5Profile | null, patch: Partial<Mt5Profile>): Mt5Profile {
+  return {
+    login: patch.login ?? base?.login ?? 0,
+    name: patch.name ?? base?.name,
+    currency: patch.currency ?? base?.currency ?? 'USD',
+    balance: patch.balance ?? base?.balance ?? 0,
+    equity: patch.equity ?? base?.equity ?? 0,
+    margin: patch.margin ?? base?.margin ?? 0,
+    freeMargin: patch.freeMargin ?? base?.freeMargin ?? 0,
+    marginLevel: patch.marginLevel ?? base?.marginLevel ?? 0,
+    leverage: patch.leverage ?? base?.leverage ?? 0,
+    credit: patch.credit ?? base?.credit,
+    profit: patch.profit ?? base?.profit,
+  };
+}
+
 export function normalizePosition(raw: unknown): Mt5Position | null {
   if (!raw || typeof raw !== 'object') return null;
   const row = raw as Record<string, unknown>;

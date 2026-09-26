@@ -6,3 +6,4 @@ export * from './endpoints';
 export * from './mt5Client';
 export * from './tradingService';
 export * from './authService';
+export * from './signalr';

@@ -21,13 +21,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { SparklineChart } from '../../components/common/SparklineChart';
 import { SymbolIcon } from '../../components/common/SymbolIcon';
 import { useAccount } from '../../context/AccountContext';
+import { useTradingData } from '../../context/TradingDataContext';
 import {
   SwitchAccountModal,
   OpenAccountModal,
 } from '../../components/modals';
 import { ChartScreen } from '../Chart/ChartScreen';
 import { mt5TradingService } from '../../api/mt5/tradingService';
-import { Mt5Position } from '../../api/mt5/types';
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
 import { DEFAULT_CATALOG_SYMBOLS, CatalogSymbol } from '../../constants/symbolsCatalog';
 import { symbolDisplayName, marketSymbolsMatch } from '../../utils/symbol';
@@ -75,7 +75,7 @@ export const TradeScreen: React.FC = () => {
   const [showOpenAccount, setShowOpenAccount] = useState<boolean>(false);
   const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | null>(null);
 
-  const [positions, setPositions] = useState<Mt5Position[]>([]);
+  const { positions, refresh: refreshTrading } = useTradingData();
   const [sparklines, setSparklines] = useState<Record<string, number[]>>({});
   const [visibleSymbols, setVisibleSymbols] = useState<string[]>([]);
 
@@ -222,25 +222,9 @@ export const TradeScreen: React.FC = () => {
     }
   }, []);
 
-  // Fetch active positions for active account to show order banners
-  const fetchPositions = useCallback(async () => {
-    try {
-      const livePositions = await mt5TradingService.getPositions();
-      setPositions(livePositions);
-    } catch {
-      setPositions([]);
-    }
-  }, []);
-
   useEffect(() => {
     loadSymbols();
   }, [loadSymbols, activeAccount.id]);
-
-  useEffect(() => {
-    if (isFocused) {
-      fetchPositions();
-    }
-  }, [isFocused, activeAccount.id, fetchPositions]);
 
   // Update sparklines when live ticks arrive
   useEffect(() => {
@@ -273,8 +257,8 @@ export const TradeScreen: React.FC = () => {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadSymbols();
-    fetchPositions();
-  }, [loadSymbols, fetchPositions]);
+    refreshTrading();
+  }, [loadSymbols, refreshTrading]);
 
   // Active positions summary per symbol
   const getSymbolTradeSummary = useCallback(
