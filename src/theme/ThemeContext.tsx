@@ -19,24 +19,16 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const systemColorScheme = useColorScheme();
-  const [mode, setMode] = useState<ThemeMode>(systemColorScheme === 'dark' ? 'dark' : 'light');
-
-  // React to phone system theme changes automatically
-  React.useEffect(() => {
-    if (systemColorScheme === 'dark' || systemColorScheme === 'light') {
-      setMode(systemColorScheme);
-    }
-  }, [systemColorScheme]);
+  const [mode, setMode] = useState<ThemeMode>('light');
 
   const toggleTheme = () => {
-    setMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    setMode('light');
   };
 
   const themeValues: ThemeContextType = {
-    mode,
-    isDark: mode === 'dark',
-    colors: mode === 'dark' ? Colors.dark : Colors.light,
+    mode: 'light',
+    isDark: false,
+    colors: Colors.light,
     brand: Colors.brand,
     trading: Colors.trading,
     spacing: Spacing,
