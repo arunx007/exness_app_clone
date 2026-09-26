@@ -93,11 +93,11 @@ const INITIAL_DEMO_POSITIONS: Mt5Position[] = [
     symbol: 'BTCUSD',
     type: 'BUY',
     volume: 0.01,
-    openPrice: 83954.32,
-    currentPrice: 83751.82,
+    openPrice: 83985.83,
+    currentPrice: 83985.83,
     stopLoss: 0,
     takeProfit: 0,
-    profit: 0.37,
+    profit: 0.0,
     swap: 0,
     commission: 0,
     openTime: new Date(Date.now() - 3600000).toISOString(),
@@ -196,9 +196,22 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       ]);
 
       if (nextProfile) setProfile(nextProfile);
-      if (!positionsAuthoritative.current || nextPositions.length > 0) {
+      if (!positionsAuthoritative.current) {
         updateBaselines(nextPositions);
-        setPositions(nextPositions);
+        setPositions((current) => {
+          if (current.length === 0) return nextPositions;
+          return nextPositions.map((next) => {
+            const existing = current.find((p) => p.ticket === next.ticket);
+            if (existing && existing.currentPrice > 0) {
+              return {
+                ...next,
+                currentPrice: existing.currentPrice,
+                profit: existing.profit,
+              };
+            }
+            return next;
+          });
+        });
       }
       if (!ordersAuthoritative.current || nextOrders.length > 0) {
         setOrders(nextOrders);
@@ -339,27 +352,20 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             if (marketSymbolsMatch(pos.symbol, tick.symbol)) {
               const livePrice = pos.type === 'BUY' ? tick.bid : tick.ask;
               if (livePrice > 0) {
-                const base = serverBaselinesRef.current.get(pos.ticket);
-                let liveProfit = pos.profit;
-                if (base) {
-                  const isBuy = base.type === 'BUY';
-                  const open = base.openPrice;
-                  const prevMark = base.serverPrice > 0 ? base.serverPrice : open;
-                  const prevMove = isBuy ? prevMark - open : open - prevMark;
-                  const nextMove = isBuy ? livePrice - open : open - livePrice;
-                  const floating = base.serverProfit - base.swap - base.commission;
+                const isBuy = pos.type === 'BUY';
+                const diff = isBuy ? livePrice - pos.openPrice : pos.openPrice - livePrice;
+                const sym = pos.symbol.toUpperCase();
+                let mult = 1;
+                if (sym.includes('XAU') || sym.includes('GOLD')) mult = 100;
+                else if (sym.includes('XAG') || sym.includes('SILVER')) mult = 5000;
+                else if (sym.includes('BTC') || sym.includes('ETH') || sym.includes('SOL')) mult = 10;
+                else if (sym.includes('EUR') || sym.includes('GBP') || sym.includes('AUD') || sym.includes('NZD') || sym.includes('USD')) mult = 100000;
 
-                  if (Math.abs(prevMove) > 1e-6) {
-                    liveProfit = floating * (nextMove / prevMove) + base.swap + base.commission;
-                  } else {
-                    // Direct point diff calculation
-                    liveProfit = base.serverProfit + nextMove * base.volume;
-                  }
-                }
+                const liveProfit = Number((diff * pos.volume * mult + (pos.swap ?? 0) + (pos.commission ?? 0)).toFixed(2));
                 return {
                   ...pos,
                   currentPrice: livePrice,
-                  profit: Number(liveProfit.toFixed(2)),
+                  profit: liveProfit,
                 };
               }
             }

@@ -79,11 +79,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   });
 
   const lastLivePriceRef = useRef<number>(initialPrice || 0);
-  useEffect(() => {
-    if (initialPrice && initialPrice > 0 && !lastLivePriceRef.current) {
-      lastLivePriceRef.current = initialPrice;
-    }
-  }, [initialPrice]);
 
   const tradingSymbol = symbol ? symbol.trim() : 'BTCUSD';
   const chartSymbol = normalizeMarketSymbol(tradingSymbol);
@@ -103,10 +98,9 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         interval: initialResolutionRef.current,
         theme: 'light',
         background: '#FFFFFF',
-        price: lastLivePriceRef.current || initialPrice,
         serverTimeOffset: chartSocket.getBrokerOffsetMs(),
       }),
-    [chartSymbol, tradingSymbol, initialPrice],
+    [chartSymbol, tradingSymbol],
   );
 
   // Synchronize open positions and pending orders for broker lines

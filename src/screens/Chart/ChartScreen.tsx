@@ -550,7 +550,6 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             };
             if (revMap[res]) setSelectedTimeframe(revMap[res]);
           }}
-          initialPrice={bidPrice}
           onLiveQuote={handleLiveQuote}
           previewOrder={
             orderExecutionModal.visible
