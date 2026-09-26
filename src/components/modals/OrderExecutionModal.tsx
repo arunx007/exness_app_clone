@@ -179,27 +179,27 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
     });
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback onPress={() => {}}>
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <View
-                style={[
-                  styles.bottomSheet,
-                  { paddingBottom: Math.max(insets.bottom, 14) + 6 },
-                ]}
-              >
-                {/* Drag Handle */}
-                <View style={styles.handleBar} />
+    <View style={styles.sheetContainer} pointerEvents="box-none">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View
+          style={[
+            styles.bottomSheet,
+            { paddingBottom: Math.max(insets.bottom, 14) + 6 },
+          ]}
+        >
+          {/* Drag Handle (tap to close) */}
+          <TouchableOpacity
+            style={styles.handleContainer}
+            activeOpacity={0.7}
+            onPress={onClose}
+          >
+            <View style={styles.handleBar} />
+          </TouchableOpacity>
 
                 {/* Tabs: Market | Pending */}
                 <View style={styles.tabsHeader}>
@@ -480,33 +480,42 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
                         color="#6B7280"
                       />
                     </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            </KeyboardAvoidingView>
-          </TouchableWithoutFeedback>
+            </View>
+          </View>
         </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    justifyContent: 'flex-end',
+  sheetContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 999,
   },
   bottomSheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingTop: 10,
+    paddingTop: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
+    shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
+    shadowRadius: 10,
+    elevation: 20,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  handleContainer: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   handleBar: {
     width: 38,
@@ -514,7 +523,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: '#D1D5DB',
     alignSelf: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   tabsHeader: {
     flexDirection: 'row',

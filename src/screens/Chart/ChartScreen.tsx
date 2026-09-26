@@ -312,131 +312,260 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       </View>
 
       {/* HEADER BAR (Row 1): One-click switch | Account Capsule | Settings & Close */}
-      <View style={styles.headerBar}>
-        {/* Left: One-Click Trading Toggle Switch (1:1 with Image 1) */}
-        <TouchableOpacity
-          style={[
-            styles.oneClickSwitchTrack,
-            oneClickEnabled && styles.oneClickSwitchTrackActive,
-          ]}
-          activeOpacity={0.8}
-          onPress={handleToggleOneClick}
-        >
-          <View
-            style={[
-              styles.oneClickSwitchThumb,
-              oneClickEnabled && styles.oneClickSwitchThumbActive,
-            ]}
-          >
-            <Ionicons
-              name="flash"
-              size={12}
-              color={oneClickEnabled ? '#5E7182' : '#9CA3AF'}
-            />
-          </View>
-        </TouchableOpacity>
-
-        {/* Center: Account Capsule */}
-        <TouchableOpacity
-          style={styles.accountCapsule}
-          activeOpacity={0.8}
-          onPress={() => setShowSwitchAccount(true)}
-        >
-          <View
-            style={[
-              styles.demoChip,
-              activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
-            ]}
-          >
-            <Text
-              style={[
-                styles.demoChipText,
-                activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
-              ]}
-            >
-              {activeAccount.type}
-            </Text>
-          </View>
-
-          <Text style={styles.balanceText} numberOfLines={1}>
-            {activeAccount.balance} USD :
-          </Text>
-        </TouchableOpacity>
-
-        {/* Right: Settings Icon */}
-        <View style={styles.headerRightActions}>
-          <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-            <Ionicons name="settings-outline" size={21} color="#111827" />
-          </TouchableOpacity>
-
-          {onClose && (
-            <TouchableOpacity
-              onPress={onClose}
-              style={[styles.headerIconBtn, { marginLeft: 2 }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={22} color="#111827" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      {/* FLOATING ORDERS SUMMARY BAR (Row 2 - 1:1 with Image 1) */}
-      {activeOrders.length > 0 && (
-        <View style={styles.ordersSummaryBar}>
-          <TouchableOpacity
-            style={styles.ordersSummaryCapsule}
-            activeOpacity={0.8}
-            onPress={() => {
-              setOrdersModalTab('Open');
-              setShowOrdersModal(true);
-            }}
-          >
-            <Text style={styles.ordersLabel}>Open</Text>
-            <View style={styles.countBadgeActive}>
-              <Text style={styles.countBadgeText}>{activeOrders.length}</Text>
+      {/* HEADER BAR */}
+      {orderExecutionModal.visible ? (
+        /* Image 3: Minimal Header when sheet is open */
+        <View style={styles.headerBarSheetOpen}>
+          <TouchableOpacity style={styles.sheetHeaderSymbolBadge} activeOpacity={0.7}>
+            <View style={styles.symbolIconCircle}>
+              <Text style={styles.symbolIconText}>₿</Text>
             </View>
-            <Text
-              style={[
-                styles.summaryPnlText,
-                { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
-              ]}
-            >
-              {orderPnl} USD
-            </Text>
+            <Text style={styles.sheetHeaderSymbolText}>{symbol || 'BTC'}</Text>
+            <Ionicons name="chevron-down" size={14} color="#111827" style={{ marginLeft: 3 }} />
           </TouchableOpacity>
 
-          {/* Close all circular button with badge (matching Image 1) */}
-          <View style={styles.closeAllWrapper}>
-            <TouchableOpacity
-              style={styles.closeAllCircle}
-              activeOpacity={0.7}
-              onPress={handleCloseAll}
+          <TouchableOpacity
+            style={styles.accountCapsule}
+            activeOpacity={0.8}
+            onPress={() => setShowSwitchAccount(true)}
+          >
+            <View
+              style={[
+                styles.demoChip,
+                activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
+              ]}
             >
-              <Ionicons name="close" size={16} color="#111827" />
-              <View style={styles.closeAllCountBadge}>
-                <Text style={styles.closeAllCountText}>{activeOrders.length}</Text>
+              <Text
+                style={[
+                  styles.demoChipText,
+                  activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
+                ]}
+              >
+                {activeAccount.type}
+              </Text>
+            </View>
+
+            <Text style={styles.balanceText} numberOfLines={1}>
+              {activeAccount.balance} USD :
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        /* Image 1 & 2: Regular Header */
+        <View style={styles.headerBar}>
+          {/* Left: One-Click Trading Toggle Switch */}
+          <View style={styles.oneClickLeftContainer}>
+            <TouchableOpacity
+              style={[
+                styles.oneClickSwitchTrack,
+                oneClickEnabled && styles.oneClickSwitchTrackActive,
+              ]}
+              activeOpacity={0.8}
+              onPress={handleToggleOneClick}
+            >
+              <View
+                style={[
+                  styles.oneClickSwitchThumb,
+                  oneClickEnabled && styles.oneClickSwitchThumbActive,
+                ]}
+              >
+                <Ionicons
+                  name="flash"
+                  size={12}
+                  color={oneClickEnabled ? '#5E7182' : '#9CA3AF'}
+                />
               </View>
             </TouchableOpacity>
-            <Text style={styles.closeAllLabel}>Close all</Text>
+
+            {!oneClickEnabled && (
+              <Text style={styles.oneClickLabelText}>One-click</Text>
+            )}
+          </View>
+
+          {/* Center: Account Capsule */}
+          <TouchableOpacity
+            style={styles.accountCapsule}
+            activeOpacity={0.8}
+            onPress={() => setShowSwitchAccount(true)}
+          >
+            <View
+              style={[
+                styles.demoChip,
+                activeAccount.type === 'Demo' ? styles.demoBg : styles.realBg,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.demoChipText,
+                  activeAccount.type === 'Demo' ? styles.demoColor : styles.realColor,
+                ]}
+              >
+                {activeAccount.type}
+              </Text>
+            </View>
+
+            <Text style={styles.balanceText} numberOfLines={1}>
+              {activeAccount.balance} USD :
+            </Text>
+          </TouchableOpacity>
+
+          {/* Right Actions */}
+          <View style={styles.headerRightActions}>
+            {!oneClickEnabled && (
+              <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
+                <Ionicons name="time-outline" size={21} color="#111827" />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
+              <Ionicons name="settings-outline" size={21} color="#111827" />
+            </TouchableOpacity>
+
+            {onClose && (
+              <TouchableOpacity
+                onPress={onClose}
+                style={[styles.headerIconBtn, { marginLeft: 2 }]}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={22} color="#111827" />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       )}
 
-      {/* CHART TOOLBAR (Row 3): Toolbar with Timeframe & Indicators */}
-      <View style={styles.chartToolbar}>
-        {/* Left icon: sidebar toggle */}
-        <TouchableOpacity style={styles.toolbarBtn}>
-          <Ionicons name="chevron-back-outline" size={17} color="#4B5563" />
-        </TouchableOpacity>
+      {/* FLOATING ORDERS SUMMARY BAR (Row 2 - Hidden when sheet is open) */}
+      {!orderExecutionModal.visible && activeOrders.length > 0 && (
+        oneClickEnabled ? (
+          /* Image 2: One-click ENABLED */
+          <View style={styles.ordersSummaryBar}>
+            <TouchableOpacity
+              style={styles.ordersSummaryCapsule}
+              activeOpacity={0.8}
+              onPress={() => {
+                setOrdersModalTab('Open');
+                setShowOrdersModal(true);
+              }}
+            >
+              <Text style={styles.ordersLabel}>Open</Text>
+              <View style={styles.countBadgeActive}>
+                <Text style={styles.countBadgeText}>{activeOrders.length}</Text>
+              </View>
+              <Text
+                style={[
+                  styles.summaryPnlText,
+                  { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
+                ]}
+              >
+                {parseFloat(orderPnl) >= 0 ? `+${orderPnl}` : orderPnl} USD
+              </Text>
+            </TouchableOpacity>
 
-        {/* Timeframe Button */}
-        <TouchableOpacity
-          style={styles.timeframeBtn}
-          onPress={() => setShowTimeframePicker(!showTimeframePicker)}
-        >
-          <Text style={styles.timeframeText}>{selectedTimeframe}</Text>
-        </TouchableOpacity>
+            <View style={styles.oneClickActionBtnsGroup}>
+              {/* Close profitable circular button with badge (Image 2) */}
+              <View style={styles.closeBtnWrapper}>
+                <TouchableOpacity
+                  style={styles.closeProfitableCircle}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setActiveOrders((prev) => prev.filter((o) => !o.isProfit));
+                  }}
+                >
+                  <Ionicons name="checkmark" size={17} color="#10B981" />
+                  <View style={styles.closeProfitableBadge}>
+                    <Text style={styles.closeProfitableBadgeText}>
+                      {activeOrders.filter((o) => o.isProfit).length || 1}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <Text style={styles.closeActionLabel}>Close profitable</Text>
+              </View>
+
+              {/* Close all circular button with badge (Image 2) */}
+              <View style={styles.closeBtnWrapper}>
+                <TouchableOpacity
+                  style={styles.closeAllCircle}
+                  activeOpacity={0.7}
+                  onPress={handleCloseAll}
+                >
+                  <Ionicons name="close" size={16} color="#111827" />
+                  <View style={styles.closeAllCountBadge}>
+                    <Text style={styles.closeAllCountText}>{activeOrders.length}</Text>
+                  </View>
+                </TouchableOpacity>
+                <Text style={styles.closeActionLabel}>Close all</Text>
+              </View>
+            </View>
+          </View>
+        ) : (
+          /* Image 1: One-click DISABLED */
+          <View style={styles.ordersSummaryBarDisabled}>
+            <View style={styles.openPendingTabsGroup}>
+              <TouchableOpacity
+                style={styles.openTabBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setOrdersModalTab('Open');
+                  setShowOrdersModal(true);
+                }}
+              >
+                <Text style={styles.openTabLabel}>Open</Text>
+                <View style={styles.openCountBadge}>
+                  <Text style={styles.openCountBadgeText}>{activeOrders.length}</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.pendingTabBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setOrdersModalTab('Pending');
+                  setShowOrdersModal(true);
+                }}
+              >
+                <Text style={styles.pendingTabLabel}>Pending</Text>
+                <View style={styles.pendingCountBadge}>
+                  <Text style={styles.pendingCountBadgeText}>0</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.disabledPnlCloseRow}>
+              <Text
+                style={[
+                  styles.disabledPnlText,
+                  { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
+                ]}
+              >
+                {parseFloat(orderPnl) >= 0 ? `+${orderPnl}` : orderPnl} USD
+              </Text>
+              <TouchableOpacity
+                style={styles.disabledCloseIconBtn}
+                activeOpacity={0.7}
+                onPress={handleCloseAll}
+              >
+                <Ionicons name="close" size={20} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )
+      )}
+
+      {/* CHART TOOLBAR (Row 3): Hidden when sheet is open */}
+      {!orderExecutionModal.visible && (
+        <View style={styles.chartToolbar}>
+          {/* Left icon: sidebar toggle */}
+          <TouchableOpacity style={styles.toolbarBtn}>
+            <Ionicons name="chevron-back-outline" size={17} color="#4B5563" />
+          </TouchableOpacity>
+
+          {/* Timeframe Button */}
+          <TouchableOpacity
+            style={styles.timeframeBtn}
+            onPress={() => setShowTimeframePicker(!showTimeframePicker)}
+          >
+            <Text style={styles.timeframeText}>{selectedTimeframe}</Text>
+          </TouchableOpacity>
 
         {/* Candlestick type icon */}
         <TouchableOpacity style={styles.toolbarBtn}>
@@ -467,20 +596,23 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           <Text style={styles.saveSubtitle}>Save</Text>
         </TouchableOpacity>
       </View>
+      )}
 
       {/* DEDICATED TRADINGVIEW CHART CONTAINER AREA */}
       {/* (Can be slotted with TradingView WebView or native chart component) */}
       <View style={styles.tradingViewChartContainer}>
         {/* Top-Left Chart Header Overlay */}
         <View style={styles.chartHeaderOverlay}>
-          <View style={styles.symbolBadgeRow}>
-            <View style={styles.btcMiniCircle}>
-              <Text style={styles.btcMiniText}>₿</Text>
+          {!orderExecutionModal.visible && (
+            <View style={styles.symbolBadgeRow}>
+              <View style={styles.btcMiniCircle}>
+                <Text style={styles.btcMiniText}>₿</Text>
+              </View>
+              <Text style={styles.chartSymbolText}>{symbol}</Text>
+              <Ionicons name="chevron-down" size={14} color="#6B7280" style={{ marginHorizontal: 2 }} />
+              <Text style={styles.chartPeriodText}>· 5</Text>
             </View>
-            <Text style={styles.chartSymbolText}>{symbol}</Text>
-            <Ionicons name="chevron-down" size={14} color="#6B7280" style={{ marginHorizontal: 2 }} />
-            <Text style={styles.chartPeriodText}>· 5</Text>
-          </View>
+          )}
           <Text style={styles.chartLivePriceText}>
             {bidPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </Text>
@@ -737,64 +869,114 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
         </View>
       </View>
 
-      {/* BOTTOM TRADING ACTION BAR: Sell | Lots Stepper | Buy (1:1 with Image 1) */}
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <View style={styles.tradeButtonsRow}>
-          {/* SELL BUTTON (Red) */}
-          <TouchableOpacity
-            style={styles.sellBtn}
-            activeOpacity={0.88}
-            onPress={handleSellPress}
-          >
-            <Text style={styles.tradeActionTitle}>Sell</Text>
-            <Text style={styles.tradeActionPrice}>{bidPrice.toFixed(2)}</Text>
-          </TouchableOpacity>
+      {/* BOTTOM TRADING ACTION BAR: Hidden when orderExecutionModal is open */}
+      {!orderExecutionModal.visible && (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {oneClickEnabled ? (
+            /* Image 2: One-click ENABLED */
+            <>
+              <View style={styles.tradeButtonsRow}>
+                {/* SELL BUTTON (Red) */}
+                <TouchableOpacity
+                  style={styles.sellBtn}
+                  activeOpacity={0.88}
+                  onPress={handleSellPress}
+                >
+                  <Text style={styles.tradeActionTitle}>Sell</Text>
+                  <Text style={styles.tradeActionPrice}>{bidPrice.toFixed(2)}</Text>
+                </TouchableOpacity>
 
-          {/* LOTS STEPPER CONTAINER (Center) */}
-          <View style={styles.lotStepperBox}>
-            <TouchableOpacity
-              style={styles.lotStepBtn}
-              onPress={() => adjustTradingLots(-0.01)}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="remove" size={16} color="#4B5563" />
-            </TouchableOpacity>
+                {/* LOTS STEPPER CONTAINER (Center) */}
+                <View style={styles.lotStepperBox}>
+                  <TouchableOpacity
+                    style={styles.lotStepBtn}
+                    onPress={() => adjustTradingLots(-0.01)}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="remove" size={16} color="#4B5563" />
+                  </TouchableOpacity>
 
-            <View style={styles.lotCenterCol}>
-              <Text style={styles.lotLabelSmall}>Lots</Text>
-              <Text style={styles.lotValueBold}>{tradingLots.toFixed(2)}</Text>
-            </View>
+                  <View style={styles.lotCenterCol}>
+                    <Text style={styles.lotLabelSmall}>Lots</Text>
+                    <Text style={styles.lotValueBold}>{tradingLots.toFixed(2)}</Text>
+                  </View>
 
-            <TouchableOpacity
-              style={styles.lotStepBtn}
-              onPress={() => adjustTradingLots(0.01)}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="add" size={16} color="#4B5563" />
-            </TouchableOpacity>
-          </View>
+                  <TouchableOpacity
+                    style={styles.lotStepBtn}
+                    onPress={() => adjustTradingLots(0.01)}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="add" size={16} color="#4B5563" />
+                  </TouchableOpacity>
+                </View>
 
-          {/* BUY BUTTON (Blue) */}
-          <TouchableOpacity
-            style={styles.buyBtn}
-            activeOpacity={0.88}
-            onPress={handleBuyPress}
-          >
-            <Text style={styles.tradeActionTitle}>Buy</Text>
-            <Text style={styles.tradeActionPrice}>{askPrice.toFixed(2)}</Text>
-          </TouchableOpacity>
+                {/* BUY BUTTON (Blue) */}
+                <TouchableOpacity
+                  style={styles.buyBtn}
+                  activeOpacity={0.88}
+                  onPress={handleBuyPress}
+                >
+                  <Text style={styles.tradeActionTitle}>Buy</Text>
+                  <Text style={styles.tradeActionPrice}>{askPrice.toFixed(2)}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* BOTTOM METRICS INFO ROW: Spread | Fees | Margin (1:400) + (i) icon */}
+              <View style={styles.tradeMetricsRow}>
+                <Text style={styles.tradeMetricsText}>
+                  Spread: 10.00 | Fees: ~ {(tradingLots * 10.0).toFixed(2)} USD | Margin: {((tradingLots * bidPrice) / 400).toFixed(2)} USD{'\n'}(1:400)
+                </Text>
+                <TouchableOpacity activeOpacity={0.7}>
+                  <Ionicons name="information-circle-outline" size={20} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            /* Image 1: One-click DISABLED */
+            <>
+              <View style={styles.tradeButtonsRow}>
+                {/* SELL BUTTON (Red) */}
+                <TouchableOpacity
+                  style={styles.sellBtn}
+                  activeOpacity={0.88}
+                  onPress={handleSellPress}
+                >
+                  <Text style={styles.tradeActionTitle}>Sell</Text>
+                  <Text style={styles.tradeActionPrice}>{bidPrice.toFixed(2)}</Text>
+                </TouchableOpacity>
+
+                {/* SPREAD BADGE (Center - Image 1) */}
+                <View style={styles.spreadBoxDisabled}>
+                  <Text style={styles.spreadBoxDisabledText}>10.00</Text>
+                </View>
+
+                {/* BUY BUTTON (Blue) */}
+                <TouchableOpacity
+                  style={styles.buyBtn}
+                  activeOpacity={0.88}
+                  onPress={handleBuyPress}
+                >
+                  <Text style={styles.tradeActionTitle}>Buy</Text>
+                  <Text style={styles.tradeActionPrice}>{askPrice.toFixed(2)}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* SENTIMENT BAR (Image 1: 47% Red | 53% Blue) */}
+              <View style={styles.sentimentContainer}>
+                <View style={styles.sentimentBarsRow}>
+                  <View style={[styles.sentimentBarFillRed, { flex: 47 }]} />
+                  <View style={{ width: 8 }} />
+                  <View style={[styles.sentimentBarFillBlue, { flex: 53 }]} />
+                </View>
+                <View style={styles.sentimentLabelsRow}>
+                  <Text style={styles.sentimentLabelRed}>47%</Text>
+                  <Text style={styles.sentimentLabelBlue}>53%</Text>
+                </View>
+              </View>
+            </>
+          )}
         </View>
-
-        {/* BOTTOM METRICS INFO ROW: Spread | Fees | Margin (1:400) + (i) icon */}
-        <View style={styles.tradeMetricsRow}>
-          <Text style={styles.tradeMetricsText}>
-            Spread: 10.00 | Fees: ~ {(tradingLots * 10.0).toFixed(2)} USD | Margin: {((tradingLots * bidPrice) / 400).toFixed(2)} USD{'\n'}(1:400)
-          </Text>
-          <TouchableOpacity activeOpacity={0.7}>
-            <Ionicons name="information-circle-outline" size={20} color="#6B7280" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      )}
 
       {/* Switch Account Modal */}
       <SwitchAccountModal
@@ -1520,6 +1702,240 @@ const styles = StyleSheet.create({
     borderColor: '#1E88E5',
   },
   orderPendingTypeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1E88E5',
+  },
+
+  /* Minimal Header when Sheet is Open (Image 3) */
+  headerBarSheetOpen: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  sheetHeaderSymbolBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  symbolIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F59E0B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  symbolIconText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sheetHeaderSymbolText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+
+  /* One-click toggle container with label (Image 1) */
+  oneClickLeftContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  oneClickLabelText: {
+    fontSize: 13,
+    color: '#4B5563',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+
+  /* Open / Pending Orders Row for One-Click Disabled (Image 1) */
+  ordersSummaryBarDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 20,
+    marginHorizontal: 14,
+    marginVertical: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  openPendingTabsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  openTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginRight: 6,
+  },
+  openTabLabel: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    color: '#111827',
+    marginRight: 4,
+  },
+  openCountBadge: {
+    backgroundColor: '#5C748C',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  openCountBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  pendingTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  pendingTabLabel: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginRight: 4,
+  },
+  pendingCountBadge: {
+    backgroundColor: '#9CA3AF',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  pendingCountBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  disabledPnlCloseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  disabledPnlText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    marginRight: 8,
+  },
+  disabledCloseIconBtn: {
+    padding: 3,
+    marginRight: 2,
+  },
+
+  /* One-Click Action Buttons: Close Profitable + Close All (Image 2) */
+  oneClickActionBtnsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  closeBtnWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  closeProfitableCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E6F7EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  closeProfitableBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#0A8754',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    minWidth: 15,
+    height: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeProfitableBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  closeActionLabel: {
+    fontSize: 9.5,
+    color: '#4B5563',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+
+  /* Spread Badge in Center when One-Click is Disabled (Image 1) */
+  spreadBoxDisabled: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 38,
+  },
+  spreadBoxDisabledText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+    fontVariant: ['tabular-nums'],
+  },
+
+  /* Sentiment Indicator Bar (Image 1) */
+  sentimentContainer: {
+    marginTop: 8,
+    paddingHorizontal: 2,
+  },
+  sentimentBarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 4,
+  },
+  sentimentBarFillRed: {
+    height: 3,
+    backgroundColor: '#EF4444',
+    borderRadius: 1.5,
+  },
+  sentimentBarFillBlue: {
+    height: 3,
+    backgroundColor: '#1E88E5',
+    borderRadius: 1.5,
+  },
+  sentimentLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  sentimentLabelRed: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  sentimentLabelBlue: {
     fontSize: 11,
     fontWeight: '600',
     color: '#1E88E5',
