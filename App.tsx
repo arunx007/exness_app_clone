@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, LogBox } from 'react-native';
+
+LogBox.ignoreAllLogs();
 import { SplashScreen } from './src/screens/Splash/SplashScreen';
 import { WelcomeScreen } from './src/screens/Welcome/WelcomeScreen';
 import { LoginScreen } from './src/screens/Auth/LoginScreen';

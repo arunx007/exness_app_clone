@@ -26,7 +26,7 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 export const RootNavigator: React.FC = () => {
   return (
     <Tab.Navigator
-      initialRouteName="Insights"
+      initialRouteName="Accounts"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {

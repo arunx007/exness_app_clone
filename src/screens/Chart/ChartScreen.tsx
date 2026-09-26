@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Line, Rect, Text as SvgText, G } from 'react-native-svg';
+import Svg, { Line, Rect, Text as SvgText, G, Circle } from 'react-native-svg';
 
 import * as SecureStore from 'expo-secure-store';
 import { useAccount } from '../../context/AccountContext';
@@ -21,6 +21,8 @@ import {
   ChartOrdersModal,
   ModifyOrderModal,
   OneClickTradingModal,
+  OrderExecutionModal,
+  NewOrderPayload,
 } from '../../components/modals';
 import { PositionOrder } from '../../components/cards/OrderCard';
 
@@ -77,6 +79,49 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
   const [showOpenAccount, setShowOpenAccount] = useState(false);
 
+  // Trading lots on the chart bottom bar
+  const [tradingLots, setTradingLots] = useState(4.76);
+
+  // Order execution sheet state (when One-click is disabled)
+  const [orderExecutionModal, setOrderExecutionModal] = useState<{
+    visible: boolean;
+    orderType: 'Buy' | 'Sell';
+    pendingPrice: number;
+    pendingType: 'Buy Stop' | 'Buy Limit' | 'Sell Stop' | 'Sell Limit';
+    isPending: boolean;
+    lots: number;
+  }>({
+    visible: false,
+    orderType: 'Buy',
+    pendingPrice: 83943.07,
+    pendingType: 'Buy Stop',
+    isPending: false,
+    lots: 4.76,
+  });
+
+  // Live prices
+  const [bidPrice, setBidPrice] = useState(83751.82);
+  const askPrice = parseFloat((bidPrice + 10.0).toFixed(2));
+  const orderPnl = ((bidPrice - 83954.32) * 0.01).toFixed(2);
+  const [closingOrder, setClosingOrder] = useState<PositionOrder | null>(null);
+  const [showOrdersModal, setShowOrdersModal] = useState<boolean>(false);
+  const [ordersModalTab, setOrdersModalTab] = useState<'Open' | 'Pending' | 'Closed'>('Open');
+  const [modifyingOrder, setModifyingOrder] = useState<PositionOrder | null>(null);
+
+  // Active positions list
+  const [activeOrders, setActiveOrders] = useState<PositionOrder[]>([
+    {
+      id: 'ord-btc-active',
+      symbol: symbol || 'BTC',
+      type: 'Buy',
+      lot: 0.01,
+      openPrice: '83954.32',
+      currentPrice: '83751.82',
+      pnl: '-0.38',
+      isProfit: false,
+    },
+  ]);
+
   // Load "Don't show again" preference for One-click trading modal
   useEffect(() => {
     SecureStore.getItemAsync('one_click_dont_show_again')
@@ -113,14 +158,87 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     }
   };
 
-  // Live prices
-  const [bidPrice, setBidPrice] = useState(83751.82);
-  const [askPrice, setAskPrice] = useState(83761.82);
-  const [orderPnl, setOrderPnl] = useState('-2.03');
-  const [closingOrder, setClosingOrder] = useState<PositionOrder | null>(null);
-  const [showOrdersModal, setShowOrdersModal] = useState<boolean>(false);
-  const [ordersModalTab, setOrdersModalTab] = useState<'Open' | 'Pending' | 'Closed'>('Open');
-  const [modifyingOrder, setModifyingOrder] = useState<PositionOrder | null>(null);
+  const adjustTradingLots = (delta: number) => {
+    setTradingLots((prev) => {
+      const next = parseFloat((prev + delta).toFixed(2));
+      return Math.max(0.01, next);
+    });
+  };
+
+  const handleSellPress = () => {
+    if (oneClickEnabled) {
+      const newOrd: PositionOrder = {
+        id: `ord-${Date.now()}`,
+        symbol: symbol || 'BTC',
+        type: 'Sell',
+        lot: tradingLots,
+        openPrice: bidPrice.toFixed(2),
+        currentPrice: bidPrice.toFixed(2),
+        pnl: '0.00',
+        isProfit: true,
+      };
+      setActiveOrders((prev) => [newOrd, ...prev]);
+    } else {
+      setOrderExecutionModal({
+        visible: true,
+        orderType: 'Sell',
+        pendingPrice: parseFloat((bidPrice - 160.0).toFixed(2)),
+        pendingType: 'Sell Stop',
+        isPending: false,
+        lots: tradingLots,
+      });
+    }
+  };
+
+  const handleBuyPress = () => {
+    if (oneClickEnabled) {
+      const newOrd: PositionOrder = {
+        id: `ord-${Date.now()}`,
+        symbol: symbol || 'BTC',
+        type: 'Buy',
+        lot: tradingLots,
+        openPrice: askPrice.toFixed(2),
+        currentPrice: askPrice.toFixed(2),
+        pnl: '0.00',
+        isProfit: true,
+      };
+      setActiveOrders((prev) => [newOrd, ...prev]);
+    } else {
+      setOrderExecutionModal({
+        visible: true,
+        orderType: 'Buy',
+        pendingPrice: parseFloat((askPrice + 160.0).toFixed(2)),
+        pendingType: 'Buy Stop',
+        isPending: false,
+        lots: tradingLots,
+      });
+    }
+  };
+
+  const handleConfirmOrder = (payload: NewOrderPayload) => {
+    const newOrd: PositionOrder = {
+      id: `ord-${Date.now()}`,
+      symbol: payload.symbol,
+      type: payload.orderType,
+      lot: payload.lot,
+      openPrice: payload.price.toFixed(2),
+      currentPrice: payload.orderType === 'Buy' ? askPrice.toFixed(2) : bidPrice.toFixed(2),
+      pnl: '0.00',
+      isProfit: true,
+    };
+    setActiveOrders((prev) => [newOrd, ...prev]);
+    setOrderExecutionModal((prev) => ({ ...prev, visible: false }));
+  };
+
+  const handleCloseAll = () => {
+    if (oneClickEnabled) {
+      setActiveOrders([]);
+    } else {
+      if (activeOrders.length > 0) {
+        setClosingOrder(activeOrders[0]);
+      }
+    }
+  };
 
   // Live UTC Clock
   const [utcTime, setUtcTime] = useState('');
@@ -141,15 +259,8 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   // Live Market Tick Simulation
   useEffect(() => {
     const interval = setInterval(() => {
-      const tick = (Math.random() * 4 - 2);
-      setBidPrice((prev) => {
-        const next = prev + tick;
-        setAskPrice(next + 10.0);
-        // Update P/L: Order open price is 83,954.32, Buy lot 0.01
-        const pnl = ((next - 83954.32) * 0.01).toFixed(2);
-        setOrderPnl(pnl);
-        return parseFloat(next.toFixed(2));
-      });
+      const tick = Math.random() * 4 - 2;
+      setBidPrice((prev) => parseFloat((prev + tick).toFixed(2)));
     }, 1500);
 
     return () => clearInterval(interval);
@@ -184,6 +295,12 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
 
   const orderLineY = getYForPrice(83954.32);
   const currentBidY = getYForPrice(bidPrice);
+  const previewPrice = orderExecutionModal.isPending
+    ? orderExecutionModal.pendingPrice
+    : orderExecutionModal.orderType === 'Buy'
+    ? askPrice
+    : bidPrice;
+  const previewLineY = getYForPrice(previewPrice);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -194,37 +311,29 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
         <View style={styles.topHandle} />
       </View>
 
-      {/* HEADER BAR (Row 1): One-click | Account Capsule | Clock & Gear */}
+      {/* HEADER BAR (Row 1): One-click switch | Account Capsule | Settings & Close */}
       <View style={styles.headerBar}>
-        {/* Left: One-Click Trading Toggle */}
+        {/* Left: One-Click Trading Toggle Switch (1:1 with Image 1) */}
         <TouchableOpacity
           style={[
-            styles.oneClickCapsule,
-            oneClickEnabled && styles.oneClickCapsuleActive,
+            styles.oneClickSwitchTrack,
+            oneClickEnabled && styles.oneClickSwitchTrackActive,
           ]}
           activeOpacity={0.8}
           onPress={handleToggleOneClick}
         >
           <View
             style={[
-              styles.lightningCircle,
-              oneClickEnabled && styles.lightningCircleActive,
+              styles.oneClickSwitchThumb,
+              oneClickEnabled && styles.oneClickSwitchThumbActive,
             ]}
           >
             <Ionicons
               name="flash"
-              size={11}
-              color={oneClickEnabled ? '#FFFFFF' : '#9CA3AF'}
+              size={12}
+              color={oneClickEnabled ? '#5E7182' : '#9CA3AF'}
             />
           </View>
-          <Text
-            style={[
-              styles.oneClickText,
-              oneClickEnabled && styles.oneClickTextActive,
-            ]}
-          >
-            One-click
-          </Text>
         </TouchableOpacity>
 
         {/* Center: Account Capsule */}
@@ -250,16 +359,12 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           </View>
 
           <Text style={styles.balanceText} numberOfLines={1}>
-            {activeAccount.balance} ...
+            {activeAccount.balance} USD :
           </Text>
         </TouchableOpacity>
 
-        {/* Right: Clock & Settings Icons */}
+        {/* Right: Settings Icon */}
         <View style={styles.headerRightActions}>
-          <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-            <Ionicons name="time-outline" size={22} color="#111827" />
-          </TouchableOpacity>
-
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons name="settings-outline" size={21} color="#111827" />
           </TouchableOpacity>
@@ -276,19 +381,12 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
         </View>
       </View>
 
-      {/* FLOATING ORDERS SUMMARY BAR (Row 2) */}
-      <TouchableOpacity
-        style={styles.ordersSummaryBar}
-        activeOpacity={0.8}
-        onPress={() => {
-          setOrdersModalTab('Open');
-          setShowOrdersModal(true);
-        }}
-      >
-        <View style={styles.ordersLeftGroup}>
+      {/* FLOATING ORDERS SUMMARY BAR (Row 2 - 1:1 with Image 1) */}
+      {activeOrders.length > 0 && (
+        <View style={styles.ordersSummaryBar}>
           <TouchableOpacity
-            style={styles.orderBadgeRow}
-            activeOpacity={0.7}
+            style={styles.ordersSummaryCapsule}
+            activeOpacity={0.8}
             onPress={() => {
               setOrdersModalTab('Open');
               setShowOrdersModal(true);
@@ -296,36 +394,34 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           >
             <Text style={styles.ordersLabel}>Open</Text>
             <View style={styles.countBadgeActive}>
-              <Text style={styles.countBadgeText}>1</Text>
+              <Text style={styles.countBadgeText}>{activeOrders.length}</Text>
             </View>
+            <Text
+              style={[
+                styles.summaryPnlText,
+                { color: parseFloat(orderPnl) >= 0 ? '#10B981' : '#EF4444' },
+              ]}
+            >
+              {orderPnl} USD
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.orderBadgeRow, { marginLeft: 16 }]}
-            activeOpacity={0.7}
-            onPress={() => {
-              setOrdersModalTab('Pending');
-              setShowOrdersModal(true);
-            }}
-          >
-            <Text style={styles.ordersLabel}>Pending</Text>
-            <View style={styles.countBadgeInactive}>
-              <Text style={styles.countBadgeText}>0</Text>
-            </View>
-          </TouchableOpacity>
+          {/* Close all circular button with badge (matching Image 1) */}
+          <View style={styles.closeAllWrapper}>
+            <TouchableOpacity
+              style={styles.closeAllCircle}
+              activeOpacity={0.7}
+              onPress={handleCloseAll}
+            >
+              <Ionicons name="close" size={16} color="#111827" />
+              <View style={styles.closeAllCountBadge}>
+                <Text style={styles.closeAllCountText}>{activeOrders.length}</Text>
+              </View>
+            </TouchableOpacity>
+            <Text style={styles.closeAllLabel}>Close all</Text>
+          </View>
         </View>
-
-        <View style={styles.ordersRightGroup}>
-          <Text style={styles.summaryPnlText}>{orderPnl} USD</Text>
-          <TouchableOpacity
-            style={styles.closeSummaryBtn}
-            activeOpacity={0.7}
-            onPress={() => setClosingOrder(openOrderData)}
-          >
-            <Ionicons name="close" size={20} color="#EF4444" />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
+      )}
 
       {/* CHART TOOLBAR (Row 3): Toolbar with Timeframe & Indicators */}
       <View style={styles.chartToolbar}>
@@ -462,15 +558,37 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
               );
             })}
 
-            {/* LIVE ORDER HORIZONTAL LINE (at 83,954.32) */}
-            <Line
-              x1="0"
-              y1={orderLineY}
-              x2={chartWidth}
-              y2={orderLineY}
-              stroke="#1E88E5"
-              strokeWidth="1"
-            />
+            {/* LIVE ORDER HORIZONTAL LINE */}
+            {activeOrders.length > 0 && !orderExecutionModal.visible && (
+              <Line
+                x1="0"
+                y1={orderLineY}
+                x2={chartWidth}
+                y2={orderLineY}
+                stroke="#1E88E5"
+                strokeWidth="1"
+              />
+            )}
+
+            {/* PREVIEW ORDER HORIZONTAL LINE (Images 2, 3, 4) */}
+            {orderExecutionModal.visible && (
+              <>
+                <Line
+                  x1="0"
+                  y1={previewLineY}
+                  x2={chartWidth}
+                  y2={previewLineY}
+                  stroke="#1E88E5"
+                  strokeWidth="1"
+                />
+                <Circle
+                  cx={chartWidth * 0.7}
+                  cy={previewLineY}
+                  r="3.5"
+                  fill="#1E88E5"
+                />
+              </>
+            )}
 
             {/* Current Bid Horizontal Dotted Line */}
             <Line
@@ -502,9 +620,18 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             })}
 
             {/* Active Order Price Tag on Axis (Blue) */}
-            <View style={[styles.orderPriceTagAxis, { top: orderLineY - 10 }]}>
-              <Text style={styles.orderPriceTagAxisText}>83,954.32</Text>
-            </View>
+            {activeOrders.length > 0 && !orderExecutionModal.visible && (
+              <View style={[styles.orderPriceTagAxis, { top: orderLineY - 10 }]}>
+                <Text style={styles.orderPriceTagAxisText}>83,954.32</Text>
+              </View>
+            )}
+
+            {/* Preview Order Price Tag on Axis (Images 2, 3, 4) */}
+            {orderExecutionModal.visible && (
+              <View style={[styles.orderPriceTagAxis, { top: previewLineY - 10 }]}>
+                <Text style={styles.orderPriceTagAxisText}>{previewPrice.toFixed(2)}</Text>
+              </View>
+            )}
 
             {/* Ask Price Tag on Axis (White with Blue outline) */}
             <View style={[styles.askPriceTagAxis, { top: getYForPrice(askPrice) - 10 }]}>
@@ -517,37 +644,67 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             </View>
           </View>
 
-          {/* FLOATING ORDER ACTION CHIPS ON THE ORDER LINE (1:1 with screenshot) */}
-          <View style={[styles.orderLineFloatingRow, { top: orderLineY - 14 }]}>
-            {/* TP Tag */}
-            <View style={styles.tpBox}>
-              <Text style={styles.tpText}>TP</Text>
-            </View>
-
-            {/* SL Tag */}
-            <View style={styles.slBox}>
-              <Text style={styles.slText}>SL</Text>
-            </View>
-
-            {/* Order Lot & Live P/L Pill */}
-            <View style={styles.orderPillContainer}>
-              <View style={styles.orderLotTag}>
-                <Text style={styles.orderLotTagText}>0.01</Text>
+          {/* FLOATING ORDER ACTION CHIPS ON THE ACTIVE ORDER LINE */}
+          {activeOrders.length > 0 && !orderExecutionModal.visible && (
+            <View style={[styles.orderLineFloatingRow, { top: orderLineY - 14 }]}>
+              <View style={styles.tpBox}>
+                <Text style={styles.tpText}>TP</Text>
               </View>
-
-              <View style={styles.orderPnlBox}>
-                <Text style={styles.orderPnlBoxText}>{orderPnl} USD</Text>
+              <View style={styles.slBox}>
+                <Text style={styles.slText}>SL</Text>
               </View>
-
-              <TouchableOpacity
-                style={styles.orderCloseBtn}
-                activeOpacity={0.7}
-                onPress={() => setClosingOrder(openOrderData)}
-              >
-                <Ionicons name="close" size={14} color="#1E88E5" />
-              </TouchableOpacity>
+              <View style={styles.orderPillContainer}>
+                <View style={styles.orderLotTag}>
+                  <Text style={styles.orderLotTagText}>{activeOrders[0].lot}</Text>
+                </View>
+                <View style={styles.orderPnlBox}>
+                  <Text style={styles.orderPnlBoxText}>{orderPnl} USD</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.orderCloseBtn}
+                  activeOpacity={0.7}
+                  onPress={() => setClosingOrder(activeOrders[0])}
+                >
+                  <Ionicons name="close" size={14} color="#1E88E5" />
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
+
+          {/* FLOATING ACTION PILL ON PREVIEW ORDER LINE (Images 2, 3, 4) */}
+          {orderExecutionModal.visible && (
+            <View style={[styles.orderLineFloatingRow, { top: previewLineY - 14 }]}>
+              <View style={styles.tpBox}>
+                <Text style={styles.tpText}>TP</Text>
+              </View>
+              <View style={styles.slBox}>
+                <Text style={styles.slText}>SL</Text>
+              </View>
+              <View style={styles.orderPillContainer}>
+                <View style={styles.orderLotTag}>
+                  <Text style={styles.orderLotTagText}>
+                    {orderExecutionModal.lots.toFixed(2)}
+                  </Text>
+                </View>
+
+                {orderExecutionModal.isPending && (
+                  <View style={styles.orderPendingTypeBox}>
+                    <Text style={styles.orderPendingTypeText}>
+                      {orderExecutionModal.pendingType}
+                    </Text>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={styles.orderCloseBtn}
+                  activeOpacity={0.7}
+                  onPress={() => setOrderExecutionModal((prev) => ({ ...prev, visible: false }))}
+                >
+                  <Ionicons name="close" size={14} color="#1E88E5" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* BOTTOM TIME AXIS */}
@@ -580,46 +737,62 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
         </View>
       </View>
 
-      {/* BOTTOM TRADING ACTION BAR: Sell & Buy Buttons + Sentiment Bar */}
+      {/* BOTTOM TRADING ACTION BAR: Sell | Lots Stepper | Buy (1:1 with Image 1) */}
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        {/* Sell & Buy Buttons Row with Middle Spread Badge */}
         <View style={styles.tradeButtonsRow}>
           {/* SELL BUTTON (Red) */}
           <TouchableOpacity
             style={styles.sellBtn}
             activeOpacity={0.88}
-            onPress={() => alert(`Sell order placed at ${bidPrice.toFixed(2)}`)}
+            onPress={handleSellPress}
           >
             <Text style={styles.tradeActionTitle}>Sell</Text>
             <Text style={styles.tradeActionPrice}>{bidPrice.toFixed(2)}</Text>
           </TouchableOpacity>
 
-          {/* Floating Middle Spread Badge */}
-          <View style={styles.spreadBadge}>
-            <Text style={styles.spreadText}>10.00</Text>
+          {/* LOTS STEPPER CONTAINER (Center) */}
+          <View style={styles.lotStepperBox}>
+            <TouchableOpacity
+              style={styles.lotStepBtn}
+              onPress={() => adjustTradingLots(-0.01)}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="remove" size={16} color="#4B5563" />
+            </TouchableOpacity>
+
+            <View style={styles.lotCenterCol}>
+              <Text style={styles.lotLabelSmall}>Lots</Text>
+              <Text style={styles.lotValueBold}>{tradingLots.toFixed(2)}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.lotStepBtn}
+              onPress={() => adjustTradingLots(0.01)}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="add" size={16} color="#4B5563" />
+            </TouchableOpacity>
           </View>
 
           {/* BUY BUTTON (Blue) */}
           <TouchableOpacity
             style={styles.buyBtn}
             activeOpacity={0.88}
-            onPress={() => alert(`Buy order placed at ${askPrice.toFixed(2)}`)}
+            onPress={handleBuyPress}
           >
             <Text style={styles.tradeActionTitle}>Buy</Text>
             <Text style={styles.tradeActionPrice}>{askPrice.toFixed(2)}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Sentiment Gauge Bar */}
-        <View style={styles.sentimentContainer}>
-          <View style={styles.sentimentBarsRow}>
-            <View style={styles.sentimentBarRed} />
-            <View style={styles.sentimentBarBlue} />
-          </View>
-          <View style={styles.sentimentLabelsRow}>
-            <Text style={styles.sentimentTextRed}>49%</Text>
-            <Text style={styles.sentimentTextBlue}>51%</Text>
-          </View>
+        {/* BOTTOM METRICS INFO ROW: Spread | Fees | Margin (1:400) + (i) icon */}
+        <View style={styles.tradeMetricsRow}>
+          <Text style={styles.tradeMetricsText}>
+            Spread: 10.00 | Fees: ~ {(tradingLots * 10.0).toFixed(2)} USD | Margin: {((tradingLots * bidPrice) / 400).toFixed(2)} USD{'\n'}(1:400)
+          </Text>
+          <TouchableOpacity activeOpacity={0.7}>
+            <Ionicons name="information-circle-outline" size={20} color="#6B7280" />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -653,7 +826,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       {/* Chart Orders Modal (1:1 with media_1790359184602.jpg) */}
       <ChartOrdersModal
         visible={showOrdersModal}
-        orders={[openOrderData]}
+        orders={activeOrders}
         initialTab={ordersModalTab}
         onClose={() => setShowOrdersModal(false)}
         onOrderPress={(ord) => {
@@ -674,6 +847,44 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
           }
         }}
         onDismiss={() => setModifyingOrder(null)}
+      />
+
+      {/* Order Execution Sheet (Market & Pending Order Confirmation) */}
+      <OrderExecutionModal
+        visible={orderExecutionModal.visible}
+        orderType={orderExecutionModal.orderType}
+        symbol={symbol || 'BTC'}
+        currentMarketPrice={orderExecutionModal.orderType === 'Buy' ? askPrice : bidPrice}
+        initialLots={tradingLots}
+        leverage={400}
+        onClose={() => setOrderExecutionModal((prev) => ({ ...prev, visible: false }))}
+        onConfirmOrder={handleConfirmOrder}
+        onPendingPriceChange={(price, pendingType) => {
+          setOrderExecutionModal((prev) => {
+            if (prev.pendingPrice === price && prev.pendingType === pendingType && prev.isPending) {
+              return prev;
+            }
+            return {
+              ...prev,
+              pendingPrice: price,
+              pendingType,
+              isPending: true,
+            };
+          });
+        }}
+        onTabChange={(tab) => {
+          setOrderExecutionModal((prev) => {
+            const isPend = tab === 'Pending';
+            if (prev.isPending === isPend) return prev;
+            return { ...prev, isPending: isPend };
+          });
+        }}
+        onLotsChange={(lots) => {
+          setOrderExecutionModal((prev) => {
+            if (prev.lots === lots) return prev;
+            return { ...prev, lots };
+          });
+        }}
       />
 
       {/* One-Click Trading Info & Confirmation Modal */}
@@ -707,6 +918,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 14,
     paddingVertical: 4,
+  },
+  oneClickSwitchTrack: {
+    width: 48,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    alignItems: 'flex-start',
+  },
+  oneClickSwitchTrackActive: {
+    backgroundColor: '#5E7182',
+    alignItems: 'flex-end',
+  },
+  oneClickSwitchThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  oneClickSwitchThumbActive: {
+    backgroundColor: '#FFFFFF',
   },
   oneClickCapsule: {
     flexDirection: 'row',
@@ -796,20 +1036,53 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginHorizontal: 14,
-    marginTop: 6,
-    marginBottom: 4,
-    paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 3,
-    elevation: 1,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  ordersSummaryCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  closeAllWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeAllCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  closeAllCountBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    minWidth: 15,
+    height: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeAllCountText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  closeAllLabel: {
+    fontSize: 10,
+    color: '#4B5563',
+    marginTop: 2,
+    fontWeight: '500',
   },
   ordersLeftGroup: {
     flexDirection: 'row',
@@ -1163,21 +1436,67 @@ const styles = StyleSheet.create({
   },
   sellBtn: {
     flex: 1,
-    backgroundColor: '#EA3943',
+    backgroundColor: '#EF4444',
     borderRadius: 8,
-    paddingVertical: 8,
+    paddingVertical: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    height: 50,
   },
   buyBtn: {
     flex: 1,
     backgroundColor: '#1E88E5',
     borderRadius: 8,
-    paddingVertical: 8,
+    paddingVertical: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
+    height: 50,
+  },
+  lotStepperBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    marginHorizontal: 8,
+    minWidth: 96,
+    backgroundColor: '#FFFFFF',
+  },
+  lotStepBtn: {
+    width: 26,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lotCenterCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  lotLabelSmall: {
+    fontSize: 10,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  lotValueBold: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  tradeMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  tradeMetricsText: {
+    fontSize: 11.5,
+    color: '#6B7280',
+    lineHeight: 16,
   },
   tradeActionTitle: {
     fontSize: 12,
@@ -1186,63 +1505,23 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   tradeActionPrice: {
-    fontSize: 15,
+    fontSize: 14.5,
     fontWeight: '800',
     color: '#FFFFFF',
     lineHeight: 18,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
   },
-  spreadBadge: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    transform: [{ translateX: -24 }, { translateY: -12 }],
+  orderPendingTypeBox: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    zIndex: 10,
+    borderLeftWidth: 1,
+    borderColor: '#1E88E5',
   },
-  spreadText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#6B7280',
-  },
-  sentimentContainer: {
-    marginTop: 8,
-  },
-  sentimentBarsRow: {
-    flexDirection: 'row',
-    height: 3,
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  sentimentBarRed: {
-    width: '49%',
-    backgroundColor: '#EA3943',
-    height: '100%',
-  },
-  sentimentBarBlue: {
-    width: '51%',
-    backgroundColor: '#1E88E5',
-    height: '100%',
-  },
-  sentimentLabelsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 3,
-  },
-  sentimentTextRed: {
+  orderPendingTypeText: {
     fontSize: 11,
-    color: '#EA3943',
     fontWeight: '600',
-  },
-  sentimentTextBlue: {
-    fontSize: 11,
     color: '#1E88E5',
-    fontWeight: '600',
   },
 });

@@ -9,3 +9,4 @@ export * from './VerifyContactDetailsModal';
 export * from './AccountSwitchOverlay';
 export * from './Mt5PasswordLoginModal';
 export * from './OneClickTradingModal';
+export * from './OrderExecutionModal';
