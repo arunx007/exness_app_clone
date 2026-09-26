@@ -26,6 +26,7 @@ import {
   NewOrderPayload,
 } from '../../components/modals';
 import { PositionOrder } from '../../components/cards/OrderCard';
+import { TradingViewChart } from '../../components/chart/TradingViewChart';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -634,299 +635,86 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
       )}
 
       {/* DEDICATED TRADINGVIEW CHART CONTAINER AREA */}
-      {/* (Can be slotted with TradingView WebView or native chart component) */}
       <View style={styles.tradingViewChartContainer}>
-        {/* Top-Left Chart Header Overlay */}
-        <View style={styles.chartHeaderOverlay}>
-          {!orderExecutionModal.visible && (
-            <View style={styles.symbolBadgeRow}>
-              <View style={styles.btcMiniCircle}>
-                <Text style={styles.btcMiniText}>₿</Text>
-              </View>
-              <Text style={styles.chartSymbolText}>{symbol}</Text>
-              <Ionicons name="chevron-down" size={14} color="#6B7280" style={{ marginHorizontal: 2 }} />
-              <Text style={styles.chartPeriodText}>· 5</Text>
-            </View>
-          )}
-          <Text style={styles.chartLivePriceText}>
-            {bidPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-          </Text>
-        </View>
+        {/* Real Interactive TradingView Chart */}
+        <TradingViewChart
+          symbol={symbol || 'BTCUSD'}
+          resolution={
+            selectedTimeframe === '1m'
+              ? '1'
+              : selectedTimeframe === '5m'
+              ? '5'
+              : selectedTimeframe === '15m'
+              ? '15'
+              : selectedTimeframe === '30m'
+              ? '30'
+              : selectedTimeframe === '1h'
+              ? '60'
+              : selectedTimeframe === '4h'
+              ? '240'
+              : '1D'
+          }
+          onResolutionChange={(res) => {
+            const revMap: Record<string, string> = {
+              '1': '1m',
+              '5': '5m',
+              '15': '15m',
+              '30': '30m',
+              '60': '1h',
+              '240': '4h',
+              '1D': '1D',
+              D: '1D',
+            };
+            if (revMap[res]) setSelectedTimeframe(revMap[res]);
+          }}
+          onLiveQuote={(q) => {
+            if (q.bid > 0) setBidPrice(q.bid);
+          }}
+          previewOrder={
+            orderExecutionModal.visible
+              ? {
+                  side: orderExecutionModal.orderType,
+                  price: orderExecutionModal.pendingPrice,
+                  lots: orderExecutionModal.lots,
+                  type: orderExecutionModal.isPending ? 'stop' : 'limit',
+                }
+              : null
+          }
+          onPreviewChange={(change) => {
+            setOrderExecutionModal((prev) => ({
+              ...prev,
+              pendingPrice: change.price,
+            }));
+          }}
+        />
 
-        {/* Main Chart Canvas with Candlesticks, Grids & Order Lines */}
-        <View style={styles.chartCanvasRow}>
-          <Svg width={chartWidth} height={chartHeight}>
-            {/* Background Grid Horizontal Lines */}
-            {[84800, 84600, 84400, 84200, 84000, 83800, 83600, 83400, 83200, 83000].map(
-              (p) => {
-                const y = getYForPrice(p);
-                return (
-                  <Line
-                    key={p}
-                    x1="0"
-                    y1={y}
-                    x2={chartWidth}
-                    y2={y}
-                    stroke="#F3F4F6"
-                    strokeWidth="1"
-                  />
-                );
-              }
-            )}
-
-            {/* Vertical Time Grid Lines */}
-            {[2, 6, 10, 14].map((idx) => {
-              const x = idx * candleSlotWidth + candleSlotWidth / 2;
-              return (
-                <Line
-                  key={idx}
-                  x1={x}
-                  y1="0"
-                  x2={x}
-                  y2={chartHeight}
-                  stroke="#F3F4F6"
-                  strokeWidth="1"
-                />
-              );
-            })}
-
-            {/* Candlesticks */}
-            {INITIAL_CANDLES.map((c, i) => {
-              const isBullish = c.close >= c.open;
-              const xCenter = i * candleSlotWidth + candleSlotWidth / 2;
-              const yHigh = getYForPrice(c.high);
-              const yLow = getYForPrice(c.low);
-              const yTop = getYForPrice(Math.max(c.open, c.close));
-              const yBottom = getYForPrice(Math.min(c.open, c.close));
-              const bodyHeight = Math.max(yBottom - yTop, 2);
-
-              const candleColor = isBullish ? '#1E88E5' : '#EF4444';
-
-              return (
-                <G key={i}>
-                  {/* Wick */}
-                  <Line
-                    x1={xCenter}
-                    y1={yHigh}
-                    x2={xCenter}
-                    y2={yLow}
-                    stroke={candleColor}
-                    strokeWidth="1.2"
-                  />
-                  {/* Body */}
-                  <Rect
-                    x={xCenter - candleBodyWidth / 2}
-                    y={yTop}
-                    width={candleBodyWidth}
-                    height={bodyHeight}
-                    fill={candleColor}
-                  />
-                </G>
-              );
-            })}
-
-            {/* LIVE ORDER HORIZONTAL LINE */}
-            {activeOrders.length > 0 && !orderExecutionModal.visible && (
-              <Line
-                x1="0"
-                y1={orderLineY}
-                x2={chartWidth}
-                y2={orderLineY}
-                stroke="#1E88E5"
-                strokeWidth="1"
-              />
-            )}
-
-            {/* PREVIEW ORDER HORIZONTAL LINE (Images 2, 3, 4) */}
-            {orderExecutionModal.visible && (
-              <>
-                <Line
-                  x1="0"
-                  y1={previewLineY}
-                  x2={chartWidth}
-                  y2={previewLineY}
-                  stroke="#1E88E5"
-                  strokeWidth="1"
-                />
-                <Circle
-                  cx={chartWidth * 0.7}
-                  cy={previewLineY}
-                  r="3.5"
-                  fill="#1E88E5"
-                />
-              </>
-            )}
-
-            {/* Current Bid Horizontal Dotted Line */}
-            <Line
-              x1="0"
-              y1={currentBidY}
-              x2={chartWidth}
-              y2={currentBidY}
-              stroke="#EF4444"
-              strokeWidth="1"
-              strokeDasharray="2, 2"
-            />
-          </Svg>
-
-          {/* RIGHT VERTICAL PRICE AXIS (1:1 with screenshot) */}
-          <View style={[styles.priceAxisColumn, { width: priceAxisWidth, height: chartHeight }]}>
-            {[
-              85000, 84800, 84600, 84400, 84200, 84000, 83800, 83600, 83400, 83200, 83000,
-              82800,
-            ].map((p) => {
-              const y = getYForPrice(p);
-              return (
+        {/* Floating Timeframe Picker Popup */}
+        {showTimeframePicker && (
+          <View style={styles.timeframePickerPopup}>
+            {['1m', '5m', '15m', '30m', '1h', '4h', '1D'].map((tf) => (
+              <TouchableOpacity
+                key={tf}
+                style={[
+                  styles.timeframeOptionItem,
+                  selectedTimeframe === tf && styles.timeframeOptionItemActive,
+                ]}
+                onPress={() => {
+                  setSelectedTimeframe(tf);
+                  setShowTimeframePicker(false);
+                }}
+              >
                 <Text
-                  key={p}
-                  style={[styles.axisPriceLabel, { top: y - 7 }]}
+                  style={[
+                    styles.timeframeOptionText,
+                    selectedTimeframe === tf && styles.timeframeOptionTextActive,
+                  ]}
                 >
-                  {p.toLocaleString('en-US')}.00
+                  {tf}
                 </Text>
-              );
-            })}
-
-            {/* Active Order Price Tag on Axis (Blue) */}
-            {activeOrders.length > 0 && !orderExecutionModal.visible && (
-              <View style={[styles.orderPriceTagAxis, { top: orderLineY - 10 }]}>
-                <Text style={styles.orderPriceTagAxisText}>
-                  {activeOpenPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </Text>
-              </View>
-            )}
-
-            {/* Preview Order Price Tag on Axis (Images 2, 3, 4) */}
-            {orderExecutionModal.visible && (
-              <View style={[styles.orderPriceTagAxis, { top: previewLineY - 10 }]}>
-                <Text style={styles.orderPriceTagAxisText}>{previewPrice.toFixed(2)}</Text>
-              </View>
-            )}
-
-            {/* Ask Price Tag on Axis (White with Blue outline) */}
-            <View style={[styles.askPriceTagAxis, { top: getYForPrice(askPrice) - 10 }]}>
-              <Text style={styles.askPriceTagAxisText}>{askPrice.toFixed(2)}</Text>
-            </View>
-
-            {/* Current Live Bid Price Tag on Axis (Red filled) */}
-            <View style={[styles.bidPriceTagAxis, { top: currentBidY - 10 }]}>
-              <Text style={styles.bidPriceTagAxisText}>{bidPrice.toFixed(2)}</Text>
-            </View>
-          </View>
-
-          {/* FLOATING ORDER ACTION CHIPS ON THE ACTIVE ORDER LINE */}
-          {activeOrders.length > 0 && !orderExecutionModal.visible && (
-            <View style={[styles.orderLineFloatingRow, { top: orderLineY - 14 }]}>
-              <TouchableOpacity
-                style={styles.tpBox}
-                activeOpacity={0.7}
-                onPress={() => setModifyingOrder(activeOrders[0])}
-              >
-                <Text style={styles.tpText}>TP</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.slBox}
-                activeOpacity={0.7}
-                onPress={() => setModifyingOrder(activeOrders[0])}
-              >
-                <Text style={styles.slText}>SL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.orderPillContainer}
-                activeOpacity={0.8}
-                onPress={() => setModifyingOrder(activeOrders[0])}
-              >
-                <View style={styles.orderLotTag}>
-                  <Text style={styles.orderLotTagText}>{activeOrders[0].lot}</Text>
-                </View>
-                <View style={styles.orderPnlBox}>
-                  <Text style={styles.orderPnlBoxText}>{activeOrders[0].pnl} USD</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.orderCloseBtn}
-                  activeOpacity={0.7}
-                  onPress={async () => {
-                    if (oneClickEnabled) {
-                      const pos = activeOrders[0];
-                      if (pos) {
-                        const ticket = parseInt(pos.id.replace('ord-btc-', '').replace('ord-', ''), 10) || 7730671;
-                        await closePosition(ticket, pos.lot, pos.symbol);
-                        void refreshTrading();
-                      }
-                    } else {
-                      setClosingOrder(activeOrders[0]);
-                    }
-                  }}
-                >
-                  <Ionicons name="close" size={14} color="#1E88E5" />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* FLOATING ACTION PILL ON PREVIEW ORDER LINE (Images 2, 3, 4) */}
-          {orderExecutionModal.visible && (
-            <View style={[styles.orderLineFloatingRow, { top: previewLineY - 14 }]}>
-              <View style={styles.tpBox}>
-                <Text style={styles.tpText}>TP</Text>
-              </View>
-              <View style={styles.slBox}>
-                <Text style={styles.slText}>SL</Text>
-              </View>
-              <View style={styles.orderPillContainer}>
-                <View style={styles.orderLotTag}>
-                  <Text style={styles.orderLotTagText}>
-                    {orderExecutionModal.lots.toFixed(2)}
-                  </Text>
-                </View>
-
-                {orderExecutionModal.isPending && (
-                  <View style={styles.orderPendingTypeBox}>
-                    <Text style={styles.orderPendingTypeText}>
-                      {orderExecutionModal.pendingType}
-                    </Text>
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={styles.orderCloseBtn}
-                  activeOpacity={0.7}
-                  onPress={() => setOrderExecutionModal((prev) => ({ ...prev, visible: false }))}
-                >
-                  <Ionicons name="close" size={14} color="#1E88E5" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* BOTTOM TIME AXIS */}
-        <View style={styles.timeAxisRow}>
-          <View style={styles.timeLabelsGroup}>
-            <Text style={styles.timeAxisLabel}>14:00</Text>
-            <Text style={styles.timeAxisLabel}>15:00</Text>
-            <Text style={styles.timeAxisLabel}>16:00</Text>
-            <Text style={styles.timeAxisLabel}>17:00</Text>
+            ))}
           </View>
-          <TouchableOpacity style={styles.axisGearBtn}>
-            <Ionicons name="settings-outline" size={15} color="#4B5563" />
-          </TouchableOpacity>
-        </View>
-
-        {/* TIME AXIS FOOTER BAR (Date Range | UTC Clock | % log auto) */}
-        <View style={styles.chartFooterRow}>
-          <TouchableOpacity style={styles.dateRangeBtn}>
-            <Text style={styles.dateRangeText}>Date Range</Text>
-            <Ionicons name="chevron-down" size={13} color="#4B5563" style={{ marginLeft: 2 }} />
-          </TouchableOpacity>
-
-          <Text style={styles.utcClockText}>{utcTime || '17:50:43 UTC'}</Text>
-
-          <View style={styles.chartModeGroup}>
-            <Text style={styles.chartModeText}>%</Text>
-            <Text style={styles.chartModeText}>log</Text>
-            <Text style={styles.chartModeText}>auto</Text>
-          </View>
-        </View>
+        )}
       </View>
 
       {/* BOTTOM TRADING ACTION BAR: Hidden when orderExecutionModal is open */}
@@ -2035,5 +1823,40 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#1E88E5',
+  },
+  timeframePickerPopup: {
+    position: 'absolute',
+    top: 6,
+    left: 48,
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  timeframeOptionItem: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 5,
+    marginHorizontal: 2,
+  },
+  timeframeOptionItemActive: {
+    backgroundColor: '#EFF6FF',
+  },
+  timeframeOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  timeframeOptionTextActive: {
+    color: '#1E88E5',
+    fontWeight: '700',
   },
 });

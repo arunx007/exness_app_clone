@@ -1,0 +1,3286 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0,user-scalable=no"
+    />
+    <title>TradingView Chart</title>
+    <script src="charting_library/charting_library.standalone.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000000;
+      }
+      #tv_chart_container {
+        width: 100%;
+        height: 100%;
+      }
+      /* Keep custom trading buttons flush on the left inside legend containers. */
+      #tv_chart_container [data-name='legend-source-item'] [data-name='legend-source-item-buttons'],
+      #tv_chart_container [data-name='legend-source-item'] [data-name='legend-broker-buttons'],
+      #tv_chart_container [class*='legend'] [class*='broker'] {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+      }
+      /* Hide native TradingView buy/sell UI (legend buttons). */
+      #tv_chart_container [class*='buySell'],
+      #tv_chart_container [class*='sellBuy'],
+      #tv_chart_container [class*='brokerButton'],
+      #tv_chart_container [class*='tradingButtons'],
+      #tv_chart_container [class*='buy-sell'],
+      #tv_chart_container [class*='buySellButtons'],
+      #tv_chart_container [class*='legendBuySell'],
+      #tv_chart_container [data-name='buy-sell-buttons'],
+      #tv_chart_container [data-name='legend-buy-sell-buttons'],
+      #tv_chart_container [data-name='legend-source-item-buttons'],
+      #tv_chart_container [data-name='legend-broker-buttons'],
+      #tv_chart_container [data-name='broker-button'],
+      #tv_chart_container [data-name='trade-buttons'] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+      }
+      /* Hide TradingView in-chart notification toasts ("order modified", etc.). */
+      #tv_chart_container [data-name='toast'],
+      #tv_chart_container [data-name='notification'],
+      #tv_chart_container [data-name='notice'],
+      #tv_chart_container [class*='toast'],
+      #tv_chart_container [class*='notification'],
+      #tv_chart_container [class*='messageList'],
+      #tv_chart_container [class*='snackbar'] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+      }
+      /* Hide symbol · interval · status row (e.g. BTCUSD · 15 · MT5). */
+      #tv_chart_container [data-name='legend'],
+      #tv_chart_container [data-name='legend-series-item'],
+      #tv_chart_container [data-name='legend-source-item'] [data-name='legend-source-title'],
+      #tv_chart_container [data-name='legend-source-item'] [class*='title'],
+      #tv_chart_container [class*='pane-legend'],
+      #tv_chart_container [class*='legend-'] [class*='titlesWrapper'],
+      #tv_chart_container [class*='legend-'] [class*='titleWrapper'] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+        max-height: 0 !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="tv_chart_container"></div>
+    <script>
+      (function () {
+        var container = document.getElementById('tv_chart_container');
+        if (!container) return;
+
+        var Side = { Buy: 1, Sell: -1 };
+        var ConnectionStatus = { Connected: 1 };
+        var OrderType = { Limit: 1, Market: 2, Stop: 3 };
+        var OrderStatus = { Canceled: 1, Filled: 2, Working: 6 };
+        var ParentType = { Order: 1, Position: 2 };
+
+        function getQuery(name) {
+          // iOS loads this file with params in the hash (file:// URLs cannot
+          // carry a query string in WKWebView); Android uses a normal query.
+          var source =
+            (window.location.search || '') +
+            '&' +
+            (window.location.hash || '').replace(/^#/, '');
+          var match = new RegExp('[?&]' + name + '=([^&#]*)').exec(source);
+          return match ? decodeURIComponent(match[1].replace(/\+/g, ' ')) : '';
+        }
+
+        var initialInterval = getQuery('interval') || '15';
+        var initialTheme = getQuery('theme') === 'light' ? 'light' : 'dark';
+        var initialBackground =
+          getQuery('background') || (initialTheme === 'light' ? '#FFFFFF' : '#000000');
+        var initialPrice = Number(getQuery('price') || '0');
+        var initialServerTimeOffset = parseInt(getQuery('serverTimeOffset'), 10);
+        document.documentElement.style.background = initialBackground;
+        document.body.style.background = initialBackground;
+        (function applyAppBackgroundCss() {
+          var style = document.createElement('style');
+          style.id = 'app-chart-bg';
+          style.textContent =
+            'html,body,#tv_chart_container{background:' +
+            initialBackground +
+            ' !important;}' +
+            '#tv_chart_container .chart-page,' +
+            '#tv_chart_container .chart-container,' +
+            '#tv_chart_container [class*="chart-container"],' +
+            '#tv_chart_container [class*="layout__area"],' +
+            '#tv_chart_container [class*="chart-markup-table"]{' +
+            'background-color:' +
+            initialBackground +
+            ' !important;}';
+          document.head.appendChild(style);
+        })();
+        var barStore = Object.create(null);
+        var lastBars = Object.create(null);
+        var pendingGetBars = Object.create(null);
+        var liveSubscribers = Object.create(null);
+        var nativeQuoteCache = Object.create(null);
+        var quotePushCallbacks = [];
+        var quoteSubUnsubs = Object.create(null);
+
+        var orderCallbacks = Object.create(null);
+        var modifyCallbacks = Object.create(null);
+        var orderModifyCallbacks = Object.create(null);
+        var orderCancelCallbacks = Object.create(null);
+        var closePositionCallbacks = Object.create(null);
+        var livePositions = [];
+        var liveOrders = [];
+        var PREVIEW_ORDER_ID = 'CHART_PREVIEW_ORDER';
+        var previewOrder = null;
+        /** Draggable TradingView order-line primitive (reliable on mobile WebView). */
+        var previewOrderLine = null;
+        var previewOrderLineReady = null;
+        var previewSlOrderLine = null;
+        var previewTpOrderLine = null;
+        var previewSlOrderLineReady = null;
+        var previewTpOrderLineReady = null;
+        var PREVIEW_BRACKET_OFFSET = 0.004;
+        var lastSyncedOrdersById = Object.create(null);
+        var lastSyncedOrderSigById = Object.create(null);
+        var lastSyncedPositionsById = Object.create(null);
+        var activeResolution = initialInterval;
+        window.__tvBridgeReady = false;
+        var CHART_BRIDGE_VERSION = 'preview-broker-sltp-2026-07-30';
+        /** True while user is dragging the native broker preview line. */
+        var previewDragging = false;
+        /** Set to true from the RN side to stream bridge diagnostics. */
+        window.__chartBridgeDebug = window.__chartBridgeDebug || false;
+        /** Native broker preview (TradeSync) — shows +SL/+TP on the order line. */
+        window.__previewUsesOrderLine = false;
+
+        function normalizeSymbolKey(symbol) {
+          return String(symbol || '')
+            .split('.')[0]
+            .trim()
+            .replace(/[macfhr]+$/i, '')
+            .toUpperCase();
+        }
+
+        var tradingSymbol = (getQuery('tradingSymbol') || getQuery('symbol') || 'BTCUSD')
+          .trim()
+          .toUpperCase();
+        var initialSymbol = normalizeSymbolKey(getQuery('symbol') || tradingSymbol || 'BTCUSD');
+        window.__chartTradingLots = 0.01;
+
+        function normalizeResolution(resolution) {
+          var value = String(resolution || '');
+          if (value === 'D') return '1D';
+          if (value === 'W') return '1W';
+          if (value === 'M') return '1M';
+          return value;
+        }
+
+        function storeKey(symbol, resolution) {
+          return normalizeSymbolKey(symbol) + '|' + normalizeResolution(resolution);
+        }
+
+        function lookupBars(symbol, resolution) {
+          var key = storeKey(symbol, resolution);
+          var bars = barStore[key];
+          if (bars && bars.length) return bars;
+          return [];
+        }
+
+        function toBar(candle) {
+          return {
+            time: Number(candle.time),
+            open: Number(candle.open),
+            high: Number(candle.high),
+            low: Number(candle.low),
+            close: Number(candle.close),
+            volume: Number(candle.volume) || 0,
+          };
+        }
+
+        function resolvePendingGetBars(key, bars) {
+          var pending = pendingGetBars[key];
+          if (!pending || !pending.length) return false;
+          delete pendingGetBars[key];
+          pending.forEach(function (req) {
+            try {
+              if (!bars || bars.length === 0) {
+                req.onResult([], { noData: true });
+                return;
+              }
+              var oldestBarTime = bars[0].time;
+              var requestedToMs = req.periodParams ? Number(req.periodParams.to) * 1000 : Infinity;
+              if (
+                req.periodParams &&
+                !req.periodParams.firstDataRequest &&
+                Number.isFinite(requestedToMs) &&
+                requestedToMs < oldestBarTime
+              ) {
+                req.onResult([], { noData: true });
+                return;
+              }
+              req.onResult(bars, { noData: false });
+            } catch (_) {}
+          });
+          return true;
+        }
+
+        function getIntervalMs(resolution) {
+          var res = String(resolution || '15').toUpperCase();
+          if (res === 'D' || res === '1D') return 86400000;
+          if (res === 'W' || res === '1W') return 604800000;
+          if (res === 'M' || res === '1M') return 2592000000;
+          var mins = parseInt(res, 10);
+          if (!isNaN(mins) && mins > 0) return mins * 60000;
+          return 900000;
+        }
+
+        var brokerTimeOffsetMs =
+          Number.isFinite(initialServerTimeOffset) && initialServerTimeOffset !== 0
+            ? initialServerTimeOffset
+            : 0;
+        var brokerTimeOffsetSec = Math.floor(brokerTimeOffsetMs / 1000);
+        var hasBrokerOffset = brokerTimeOffsetMs !== 0;
+
+        function getChartInnerWindow() {
+          try {
+            var tv = window.tvWidget;
+            if (!tv) return null;
+            if (typeof tv._innerWindow === 'function') {
+              var w = tv._innerWindow();
+              if (w) return w;
+            }
+            if (tv._iFrame && tv._iFrame.contentWindow) {
+              return tv._iFrame.contentWindow;
+            }
+            var iframe = document.querySelector('#tv_chart_container iframe');
+            if (iframe && iframe.contentWindow) {
+              return iframe.contentWindow;
+            }
+          } catch (_) {}
+          return null;
+        }
+
+        function syncChartApiServerTime() {
+          try {
+            var innerWin = getChartInnerWindow();
+            if (!innerWin) return;
+            var offsetSec = Math.floor(brokerTimeOffsetMs / 1000);
+
+            if (innerWin.ChartApiInstance) {
+              innerWin.ChartApiInstance.serverTime = function () {
+                return Date.now() + brokerTimeOffsetMs;
+              };
+              if (innerWin.ChartApiInstance._studyEngine) {
+                innerWin.ChartApiInstance._studyEngine.serverTime = function () {
+                  return Date.now() + brokerTimeOffsetMs;
+                };
+                innerWin.ChartApiInstance._studyEngine._serverTimeOffset = offsetSec;
+              }
+            }
+          } catch (_) {}
+        }
+
+        function updateBrokerOffset(barTimeMs, resolution, explicitOffsetMs) {
+          if (
+            Number.isFinite(explicitOffsetMs) &&
+            explicitOffsetMs !== 0 &&
+            Math.abs(explicitOffsetMs) <= 86400000
+          ) {
+            brokerTimeOffsetMs = explicitOffsetMs;
+            brokerTimeOffsetSec = Math.floor(explicitOffsetMs / 1000);
+            hasBrokerOffset = true;
+            syncChartApiServerTime();
+            return;
+          }
+          if (!barTimeMs || !Number.isFinite(barTimeMs)) return;
+          var now = Date.now();
+          var res = String(resolution || '15').toUpperCase();
+          var intervalMs = getIntervalMs(res);
+
+          // For intraday resolutions <= 60m (1m, 5m, 15m, 30m, 60m):
+          // The current bar opened at barTimeMs on the broker.
+          // On client UTC, the corresponding interval bucket opened at Math.floor(now / intervalMs) * intervalMs.
+          // The difference is the broker timezone offset relative to client UTC.
+          if (intervalMs <= 3600000) {
+            var clientBucketStart = Math.floor(now / intervalMs) * intervalMs;
+            var rawDiffMs = barTimeMs - clientBucketStart;
+            var roundedOffsetMs = Math.round(rawDiffMs / 1800000) * 1800000;
+            if (Math.abs(roundedOffsetMs) <= 86400000) {
+              brokerTimeOffsetMs = roundedOffsetMs;
+              brokerTimeOffsetSec = Math.floor(roundedOffsetMs / 1000);
+              hasBrokerOffset = true;
+              syncChartApiServerTime();
+              return;
+            }
+          }
+
+          // For 4h or 1D: if offset is not yet established, estimate from barTimeMs
+          if (!hasBrokerOffset) {
+            var midPointBrokerTime = barTimeMs + Math.min(intervalMs / 2, 7200000);
+            var estimatedDiff = midPointBrokerTime - now;
+            var estimatedOffsetMs = Math.round(estimatedDiff / 3600000) * 3600000;
+            if (Math.abs(estimatedOffsetMs) <= 86400000) {
+              brokerTimeOffsetMs = estimatedOffsetMs;
+              brokerTimeOffsetSec = Math.floor(estimatedOffsetMs / 1000);
+              hasBrokerOffset = true;
+              syncChartApiServerTime();
+            }
+          }
+        }
+
+        function updateBrokerOffsetFromTick(tickTimeMs) {
+          if (!tickTimeMs || !Number.isFinite(tickTimeMs)) return;
+          var now = Date.now();
+          var rawDiffMs = tickTimeMs - now;
+          var roundedOffsetMs = Math.round(rawDiffMs / 1800000) * 1800000;
+          if (Math.abs(roundedOffsetMs) <= 86400000) {
+            brokerTimeOffsetMs = roundedOffsetMs;
+            brokerTimeOffsetSec = Math.floor(roundedOffsetMs / 1000);
+            hasBrokerOffset = true;
+            syncChartApiServerTime();
+          }
+        }
+
+        function triggerCountdownTick() {
+          try {
+            syncChartApiServerTime();
+            var innerWin = getChartInnerWindow();
+            if (!innerWin) return;
+            if (
+              innerWin.chartWidgetCollection &&
+              typeof innerWin.chartWidgetCollection.activeChartWidget === 'function'
+            ) {
+              var activeWidget = innerWin.chartWidgetCollection.activeChartWidget().value();
+              if (
+                activeWidget &&
+                typeof activeWidget.hasModel === 'function' &&
+                activeWidget.hasModel()
+              ) {
+                var model = activeWidget.model();
+                if (model && typeof model.mainSeries === 'function') {
+                  var ms = model.mainSeries();
+                  if (
+                    ms &&
+                    ms._priceAxisView &&
+                    typeof ms._priceAxisView.updateCountdown === 'function'
+                  ) {
+                    ms._priceAxisView.updateCountdown();
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (!window.__countdownTickerTimer) {
+          window.__countdownTickerTimer = setInterval(triggerCountdownTick, 1000);
+        }
+
+        function applyHistory(symbol, resolution, candles, explicitOffsetMs) {
+          var normSymbol = normalizeSymbolKey(symbol);
+          var normResolution = normalizeResolution(resolution);
+          var key = storeKey(normSymbol, normResolution);
+          var bars = (candles || [])
+            .map(toBar)
+            .filter(function (bar) {
+              return Number.isFinite(bar.time) && bar.time > 0 && Number.isFinite(bar.close);
+            })
+            .sort(function (a, b) {
+              return a.time - b.time;
+            });
+          barStore[key] = bars;
+          if (bars.length > 0) {
+            lastBars[normSymbol] = bars[bars.length - 1];
+            updateBrokerOffset(bars[bars.length - 1].time, normResolution, explicitOffsetMs);
+          }
+          resolvePendingGetBars(key, bars);
+        }
+
+        function applyUpdate(symbol, resolution, candle, explicitOffsetMs) {
+          var normSymbol = normalizeSymbolKey(symbol);
+          var bar = toBar(candle);
+          if (!Number.isFinite(bar.time) || bar.time <= 0) return;
+          lastBars[normSymbol] = bar;
+          updateBrokerOffset(bar.time, resolution, explicitOffsetMs);
+          Object.keys(liveSubscribers).forEach(function (guid) {
+            var sub = liveSubscribers[guid];
+            if (!sub) return;
+            if (storeKey(sub.symbol, sub.resolution) !== storeKey(symbol, resolution)) return;
+            try {
+              sub.onTick(bar);
+            } catch (_) {}
+          });
+        }
+
+        function tickLiveBarFromQuote(norm, price) {
+          if (!price) return;
+          var lastBar = lastBars[norm];
+          if (!lastBar) return;
+          var nowServerMs = Date.now() + (brokerTimeOffsetSec * 1000);
+
+          Object.keys(liveSubscribers).forEach(function (guid) {
+            var sub = liveSubscribers[guid];
+            if (!sub) return;
+            if (normalizeSymbolKey(sub.symbol) !== norm) return;
+
+            var intervalMs = getIntervalMs(sub.resolution);
+            var expectedBarTime = Math.floor(nowServerMs / intervalMs) * intervalMs;
+            var targetBarTime = expectedBarTime > lastBar.time ? expectedBarTime : lastBar.time;
+
+            var nextBar;
+            if (targetBarTime > lastBar.time) {
+              nextBar = {
+                time: targetBarTime,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 1,
+              };
+            } else {
+              nextBar = {
+                time: lastBar.time,
+                open: lastBar.open,
+                high: Math.max(lastBar.high, price),
+                low: Math.min(lastBar.low, price),
+                close: price,
+                volume: (lastBar.volume || 0) + 1,
+              };
+            }
+            lastBars[norm] = nextBar;
+            try {
+              sub.onTick(nextBar);
+            } catch (_) {}
+          });
+        }
+
+        function applyQuote(quote) {
+          if (!quote) return;
+          var norm = normalizeSymbolKey(quote.symbol);
+          var bid = Number(quote.bid) || 0;
+          var ask = Number(quote.ask) || 0;
+          nativeQuoteCache[norm] = {
+            symbol: norm,
+            bid: bid,
+            ask: ask,
+            lastValidBid: bid > 0 ? bid : quote.lastValidBid,
+            lastValidAsk: ask > 0 ? ask : quote.lastValidAsk,
+          };
+          if (quote && Number.isFinite(quote.time) && quote.time > 0) {
+            updateBrokerOffsetFromTick(quote.time);
+          }
+          var price = bid > 0 ? bid : ask > 0 ? ask : quote.lastValidBid || quote.lastValidAsk;
+          tickLiveBarFromQuote(norm, price);
+          quotePushCallbacks.slice().forEach(function (cb) {
+            try {
+              cb();
+            } catch (_) {}
+          });
+        }
+
+        window.__chartBridge = {
+          applyHistory: applyHistory,
+          applyUpdate: applyUpdate,
+          applyQuote: applyQuote,
+          applyBackground: function (background) {
+            var bg = String(background || '').trim();
+            if (!bg) return;
+            document.documentElement.style.background = bg;
+            document.body.style.background = bg;
+            var style = document.getElementById('app-chart-bg');
+            if (style) {
+              style.textContent =
+                'html,body,#tv_chart_container{background:' +
+                bg +
+                ' !important;}' +
+                '#tv_chart_container .chart-page,' +
+                '#tv_chart_container .chart-container,' +
+                '#tv_chart_container [class*="chart-container"],' +
+                '#tv_chart_container [class*="layout__area"],' +
+                '#tv_chart_container [class*="chart-markup-table"]{' +
+                'background-color:' +
+                bg +
+                ' !important;}';
+            }
+            try {
+              var tv = window.tvWidget;
+              var chart = tv && tv.activeChart && tv.activeChart();
+              var overrides = {
+                'paneProperties.background': bg,
+                'paneProperties.backgroundType': 'solid',
+                'scalesProperties.backgroundColor': bg,
+              };
+              if (chart && typeof chart.applyOverrides === 'function') {
+                chart.applyOverrides(overrides);
+              }
+              if (tv && typeof tv.applyOverrides === 'function') {
+                tv.applyOverrides(overrides);
+              }
+            } catch (_) {}
+          },
+          setOrderPreview: function (payload) {
+            setOrderPreview(payload);
+          },
+        };
+
+        function getPriceScale(symbol, price) {
+          var upper = String(symbol || '').toUpperCase();
+          if (upper.indexOf('BTC') >= 0 || upper.indexOf('ETH') >= 0 || price >= 1000) return 100;
+          if (price >= 100) return 1000;
+          return 100000;
+        }
+
+        function getSymbolDigits(symbol) {
+          var upper = String(symbol || '').toUpperCase();
+          if (upper.indexOf('BTC') >= 0 || upper.indexOf('ETH') >= 0) return 2;
+          if (upper.indexOf('JPY') >= 0) return 3;
+          return 5;
+        }
+
+        function ensureBidAskSpread(bid, ask, symbol) {
+          var digits = getSymbolDigits(symbol);
+          var tick = Math.pow(10, -digits);
+          var b = Number.isFinite(bid) && bid > 0 ? bid : NaN;
+          var a = Number.isFinite(ask) && ask > 0 ? ask : NaN;
+          if (!Number.isFinite(b) && Number.isFinite(a)) b = a - tick;
+          if (!Number.isFinite(a) && Number.isFinite(b)) a = b + tick;
+          if (!Number.isFinite(b) || !Number.isFinite(a)) {
+            var base = Number.isFinite(b) ? b : Number.isFinite(a) ? a : initialPrice || 1;
+            b = base;
+            a = base + tick;
+          }
+          if (a <= b) a = b + tick;
+          return { bid: b, ask: a, spread: a - b };
+        }
+
+        function quoteKeysForSubscription(symbols, fastSymbols) {
+          var seen = Object.create(null);
+          var keys = [];
+          var all = (symbols || []).concat(fastSymbols || []);
+          for (var i = 0; i < all.length; i++) {
+            var raw = all[i];
+            if (!raw) continue;
+            var norm = normalizeSymbolKey(raw);
+            if (seen[norm]) continue;
+            seen[norm] = true;
+            keys.push({ raw: raw, norm: norm });
+          }
+          return keys;
+        }
+
+        function buildQuotePayload(symbolForChart, bid, ask) {
+          var spreadInfo = ensureBidAskSpread(bid, ask, symbolForChart);
+          var b = spreadInfo.bid;
+          var a = spreadInfo.ask;
+          var lp = (b + a) / 2;
+          var digits = getSymbolDigits(symbolForChart);
+          return {
+            s: 'ok',
+            n: symbolForChart,
+            v: {
+              bid: b,
+              ask: a,
+              lp: lp,
+              spread: spreadInfo.spread,
+              ch: 0,
+              chp: 0,
+              minmov: 1,
+              pricescale: Math.pow(10, digits),
+              short_name: symbolForChart,
+              original_name: symbolForChart,
+              description: symbolForChart,
+            },
+          };
+        }
+
+        function quotesFromKeys(keys) {
+          return keys.map(function (entry) {
+            var quote = nativeQuoteCache[entry.norm];
+            var bid =
+              (quote && (quote.bid || quote.lastValidBid)) ||
+              initialPrice ||
+              1;
+            var askRaw = quote && (quote.ask || quote.lastValidAsk);
+            var ask =
+              askRaw != null && Number(askRaw) > 0
+                ? Number(askRaw)
+                : bid + Math.max(bid * 0.0002, Math.pow(10, -getSymbolDigits(entry.norm)));
+            return buildQuotePayload(entry.raw, bid, ask);
+          });
+        }
+
+        function postToNative(message) {
+          if (!window.ReactNativeWebView) return;
+          window.ReactNativeWebView.postMessage(JSON.stringify(message));
+        }
+
+        function chartSltpDebug(tag, payload) {
+          if (!window.__chartBridgeDebug) return;
+          try {
+            console.log('[Chart][SLTP][' + tag + ']', payload || {});
+            postToNative({
+              type: 'DEBUG_SLTP',
+              payload: Object.assign({ tag: tag, bridgeVersion: CHART_BRIDGE_VERSION }, payload || {}),
+            });
+          } catch (_) {}
+        }
+
+        function chartPreviewDebug(tag, hypothesisId, payload) {
+          if (!window.__chartBridgeDebug) return;
+          try {
+            postToNative({
+              type: 'DEBUG_PREVIEW',
+              payload: Object.assign(
+                {
+                  tag: tag,
+                  hypothesisId: hypothesisId || 'A',
+                  bridgeVersion: CHART_BRIDGE_VERSION,
+                },
+                payload || {},
+              ),
+            });
+          } catch (_) {}
+        }
+
+        function normalizeEntityId(id) {
+          return String(id || '')
+            .trim()
+            .replace(/^(ord_|pos_|order_|position_)/i, '');
+        }
+
+        function resolvePositionParentId(candidate) {
+          var raw = String(candidate || '');
+          var norm = normalizeEntityId(raw);
+          var i;
+          for (i = 0; i < livePositions.length; i++) {
+            var pid = String(livePositions[i].id);
+            if (pid === raw || pid === norm) return pid;
+          }
+          return norm || raw;
+        }
+
+        function resolveOrderParentId(candidate) {
+          var raw = String(candidate || '');
+          var norm = normalizeEntityId(raw);
+          var i;
+          for (i = 0; i < liveOrders.length; i++) {
+            var oid = String(liveOrders[i].id);
+            if (oid === raw || oid === norm) return oid;
+          }
+          return norm || raw;
+        }
+
+        function hasLivePositionId(candidate) {
+          var resolved = resolvePositionParentId(candidate);
+          return livePositions.some(function (p) {
+            return String(p.id) === resolved;
+          });
+        }
+
+        function hasLiveOrderId(candidate) {
+          var resolved = resolveOrderParentId(candidate);
+          return liveOrders.some(function (o) {
+            return String(o.id) === resolved;
+          });
+        }
+
+        function BridgeDatafeed() {}
+
+        BridgeDatafeed.prototype.onReady = function (callback) {
+          setTimeout(function () {
+            callback({
+              supported_resolutions: ['1', '5', '15', '30', '60', '240', '1D'],
+              supports_marks: false,
+              supports_timescale_marks: false,
+              supports_time: true,
+            });
+          }, 0);
+        };
+
+        BridgeDatafeed.prototype.getServerTime = function (callback) {
+          var nowSec = Math.floor(Date.now() / 1000);
+          var serverTimeSec = hasBrokerOffset ? nowSec + brokerTimeOffsetSec : nowSec;
+          setTimeout(function () {
+            callback(serverTimeSec);
+          }, 0);
+        };
+
+        BridgeDatafeed.prototype.resolveSymbol = function (symbolName, onResolve) {
+          var symbol = normalizeSymbolKey(symbolName || initialSymbol);
+          onResolve({
+            name: symbol,
+            ticker: symbol,
+            description: symbol,
+            type: 'crypto',
+            session: '24x7',
+            timezone: 'Etc/UTC',
+            exchange: 'MT5',
+            listed_exchange: 'MT5',
+            format: 'price',
+            minmov: 1,
+            pricescale: getPriceScale(symbol, initialPrice),
+            has_intraday: true,
+            has_daily: true,
+            has_weekly_and_monthly: false,
+            supported_resolutions: ['1', '5', '15', '30', '60', '240', '1D'],
+            volume_precision: 2,
+            data_status: 'streaming',
+          });
+        };
+
+        BridgeDatafeed.prototype.getBars = function (
+          symbolInfo,
+          resolution,
+          periodParams,
+          onResult,
+        ) {
+          var symbol = normalizeSymbolKey(symbolInfo.ticker || symbolInfo.name);
+          var key = storeKey(symbol, resolution);
+          var cached = lookupBars(symbol, resolution);
+
+          if (cached.length > 0) {
+            var oldestBarTime = cached[0].time;
+            var requestedToMs = Number(periodParams.to) * 1000;
+            if (
+              !periodParams.firstDataRequest &&
+              Number.isFinite(requestedToMs) &&
+              requestedToMs < oldestBarTime
+            ) {
+              onResult([], { noData: true });
+              return;
+            }
+            onResult(cached, { noData: false });
+            return;
+          }
+
+          if (!pendingGetBars[key]) pendingGetBars[key] = [];
+          pendingGetBars[key].push({ onResult: onResult, periodParams: periodParams });
+
+          postToNative({
+            type: 'REQUEST_HISTORY',
+            payload: { symbol: symbol, resolution: normalizeResolution(resolution) },
+          });
+
+          setTimeout(function () {
+            var pending = pendingGetBars[key];
+            if (!pending || !pending.length) return;
+            var bars = lookupBars(symbol, resolution);
+            if (bars.length) {
+              resolvePendingGetBars(key, bars);
+              return;
+            }
+            delete pendingGetBars[key];
+            pending.forEach(function (req) {
+              try {
+                req.onResult([], { noData: true });
+              } catch (_) {}
+            });
+          }, 8000);
+        };
+
+        BridgeDatafeed.prototype.subscribeBars = function (
+          symbolInfo,
+          resolution,
+          onTick,
+          listenerGuid,
+        ) {
+          liveSubscribers[listenerGuid] = {
+            symbol: symbolInfo.name,
+            resolution: resolution,
+            onTick: onTick,
+          };
+          var symbol = normalizeSymbolKey(symbolInfo.ticker || symbolInfo.name);
+          var stored = lookupBars(symbolInfo.name, resolution);
+          if (stored.length > 0) {
+            try {
+              onTick(stored[stored.length - 1]);
+            } catch (_) {}
+          } else if (lastBars[symbol]) {
+            try {
+              onTick(lastBars[symbol]);
+            } catch (_) {}
+          }
+        };
+
+        BridgeDatafeed.prototype.unsubscribeBars = function (listenerGuid) {
+          delete liveSubscribers[listenerGuid];
+        };
+
+        BridgeDatafeed.prototype.getQuotes = function (symbols, onDataCallback, onErrorCallback) {
+          try {
+            var keys = quoteKeysForSubscription(symbols, []);
+            onDataCallback(quotesFromKeys(keys));
+          } catch (err) {
+            if (onErrorCallback) onErrorCallback(String(err));
+          }
+        };
+
+        BridgeDatafeed.prototype.subscribeQuotes = function (
+          symbols,
+          fastSymbols,
+          onRealtimeCallback,
+          listenerGUID,
+        ) {
+          var keys = quoteKeysForSubscription(symbols, fastSymbols);
+          var pushQuotes = function () {
+            onRealtimeCallback(quotesFromKeys(keys));
+          };
+          quotePushCallbacks.push(pushQuotes);
+          pushQuotes();
+          quoteSubUnsubs['quote_' + listenerGUID] = pushQuotes;
+        };
+
+        BridgeDatafeed.prototype.unsubscribeQuotes = function (listenerGUID) {
+          var key = 'quote_' + listenerGUID;
+          var cb = quoteSubUnsubs[key];
+          if (cb) {
+            var index = quotePushCallbacks.indexOf(cb);
+            if (index >= 0) quotePushCallbacks.splice(index, 1);
+          }
+          delete quoteSubUnsubs[key];
+        };
+
+        BridgeDatafeed.prototype.searchSymbols = function (_userInput, _exchange, _symbolType, onResult) {
+          onResult([]);
+        };
+
+        function bridgeAccountConfig() {
+          return {
+            supportClosePosition: true,
+            supportCloseOrder: true,
+            supportMultiposition: true,
+            supportPLUpdate: true,
+            supportPositionBrackets: true,
+            supportOrderBrackets: true,
+            supportModifyPosition: true,
+            supportModifyOrder: true,
+            supportModifyPositionBrackets: true,
+            supportModifyOrderBrackets: true,
+            supportMovePosition: true,
+            supportMoveOrder: true,
+            supportDragToModify: true,
+            supportCancelBrackets: true,
+            supportIndividualPositionBrackets: true,
+            supportIndividualOrderBrackets: true,
+            supportAddBracketsToExistingOrder: true,
+            supportMarketBrackets: true,
+            supportStopLoss: true,
+          };
+        }
+
+        function bypassHostConfirmDialogs(host) {
+          if (!host) return;
+          var runHandler = function (handler) {
+            if (typeof handler === 'function') return Promise.resolve(handler());
+            return Promise.resolve();
+          };
+          if (typeof host.showCancelBracketsDialog === 'function') {
+            host.showCancelBracketsDialog = function (_orderId, handler) {
+              return runHandler(handler);
+            };
+          }
+          if (typeof host.showCancelMultipleBracketsDialog === 'function') {
+            host.showCancelMultipleBracketsDialog = function (_orderId, handler) {
+              return runHandler(handler);
+            };
+          }
+          if (typeof host.showCancelOrderDialog === 'function') {
+            host.showCancelOrderDialog = function (_orderId, handler) {
+              return runHandler(handler);
+            };
+          }
+          if (typeof host.showCancelMultipleOrdersDialog === 'function') {
+            host.showCancelMultipleOrdersDialog = function (_symbol, _side, _qty, handler) {
+              return runHandler(handler);
+            };
+          }
+        }
+
+        function wrapBrokerForSltpDebug(broker) {
+          var names = [
+            'modifyPosition',
+            'editPositionBrackets',
+            'editIndividualPositionBrackets',
+            'modifyPositionBrackets',
+            'setPositionBrackets',
+            'cancelPositionBrackets',
+            'cancelOrder',
+            'cancelOrderBrackets',
+            'movePosition',
+            'movePositionBrackets',
+            'modifyOrder',
+            'moveOrder',
+            'editOrder',
+            'editOrderBrackets',
+          ];
+          names.forEach(function (name) {
+            var original = broker[name];
+            if (typeof original !== 'function') return;
+            broker[name] = function () {
+              var args = Array.prototype.slice.call(arguments);
+              chartSltpDebug('broker.' + name, { args: args });
+              return original.apply(broker, args);
+            };
+          });
+          return broker;
+        }
+
+        function BridgeBroker(host) {
+          this._host = host;
+        }
+
+        function syncPositionsIncremental(mappedPositions) {
+          var host = window.__bridgeBrokerHost;
+          if (!host) return;
+          var nextById = Object.create(null);
+          mappedPositions.forEach(function (p) {
+            nextById[String(p.id)] = p;
+          });
+          if (host.positionUpdate) {
+            Object.keys(lastSyncedPositionsById).forEach(function (id) {
+              if (!nextById[id]) {
+                var old = lastSyncedPositionsById[id];
+                host.positionUpdate(
+                  Object.assign({}, old, {
+                    qty: 0,
+                    stopLoss: undefined,
+                    takeProfit: undefined,
+                    brackets: undefined,
+                  }),
+                );
+                delete lastSyncedPositionsById[id];
+              }
+            });
+            mappedPositions.forEach(function (p) {
+              host.positionUpdate(p);
+              lastSyncedPositionsById[String(p.id)] = p;
+            });
+            return;
+          }
+          if (typeof host.positionsFullUpdate === 'function') host.positionsFullUpdate();
+        }
+
+        function orderSyncSignature(order) {
+          if (!order) return '';
+          return [
+            order.id,
+            order.symbol,
+            order.side,
+            order.type,
+            order.status,
+            order.qty,
+            order.price,
+            order.limitPrice,
+            order.stopPrice,
+            order.stopLoss,
+            order.takeProfit,
+            order.parentId,
+            order.parentType,
+          ].join('|');
+        }
+
+        function rememberSyncedOrder(order) {
+          var id = String(order.id);
+          // Snapshot: previewOrder is mutated in place while dragging.
+          lastSyncedOrdersById[id] = Object.assign({}, order);
+          lastSyncedOrderSigById[id] = orderSyncSignature(order);
+        }
+
+        function forgetSyncedOrder(id) {
+          delete lastSyncedOrdersById[id];
+          delete lastSyncedOrderSigById[id];
+        }
+
+        function syncOrdersIncremental(allOrders) {
+          var host = window.__bridgeBrokerHost;
+          if (!host) return;
+          var nextById = Object.create(null);
+          allOrders.forEach(function (o) {
+            nextById[String(o.id)] = o;
+          });
+          if (host.orderUpdate) {
+            Object.keys(lastSyncedOrdersById).forEach(function (id) {
+              if (!nextById[id]) {
+                var old = lastSyncedOrdersById[id];
+                host.orderUpdate(
+                  Object.assign({}, old, { qty: 0, status: OrderStatus.Canceled }),
+                );
+                forgetSyncedOrder(id);
+              }
+            });
+            allOrders.forEach(function (o) {
+              // Re-pushing an unchanged order snaps its line back to the stored
+              // price, which kills an in-progress drag (position ticks arrive
+              // continuously). Only publish orders that actually changed.
+              if (lastSyncedOrderSigById[String(o.id)] === orderSyncSignature(o)) return;
+              host.orderUpdate(o);
+              rememberSyncedOrder(o);
+            });
+            return;
+          }
+          if (typeof host.ordersFullUpdate === 'function') host.ordersFullUpdate();
+        }
+
+        function forceFullTradingRefresh() {
+          var host = window.__bridgeBrokerHost;
+          if (!host) return;
+          try {
+            if (typeof host.ordersFullUpdate === 'function') host.ordersFullUpdate();
+            if (typeof host.positionsFullUpdate === 'function') host.positionsFullUpdate();
+          } catch (_) {}
+        }
+
+        function appendPreviewOrders(allOrders) {
+          // TradeSync: native broker preview + bracket orders so TV shows +SL/+TP.
+          if (!previewOrder) return allOrders;
+          return allOrders.concat([previewOrder]).concat(buildOrderBracketOrders([previewOrder]));
+        }
+
+        function syncTradingToHost() {
+          var mappedPositions = mapPositionsForTv(livePositions);
+          var mappedOrders = mapOrdersForTv(liveOrders);
+          var allOrders = appendPreviewOrders(
+            mappedOrders
+              .concat(buildPositionBracketOrders(mappedPositions))
+              .concat(buildOrderBracketOrders(mappedOrders)),
+          );
+          syncPositionsIncremental(mappedPositions);
+          syncOrdersIncremental(allOrders);
+          // Full refresh fights active preview drags — skip while preview is showing.
+          if (!previewOrder && !previewDragging) forceFullTradingRefresh();
+        }
+
+        /** Lightweight preview patch — avoid ordersFullUpdate mid-drag (snaps the line back). */
+        function patchPreviewOnHost() {
+          var host = window.__bridgeBrokerHost;
+          if (!host || !previewOrder || typeof host.orderUpdate !== 'function') return;
+          try {
+            host.orderUpdate(previewOrder);
+            rememberSyncedOrder(previewOrder);
+            ['TP', 'SL'].forEach(function (suffix) {
+              var bracketId = PREVIEW_ORDER_ID + '_' + suffix;
+              var oldBracket = lastSyncedOrdersById[bracketId];
+              if (oldBracket) {
+                try {
+                  host.orderUpdate(
+                    Object.assign({}, oldBracket, { qty: 0, status: OrderStatus.Canceled }),
+                  );
+                } catch (_) {}
+                forgetSyncedOrder(bracketId);
+              }
+            });
+            var brackets = buildOrderBracketOrders([previewOrder]);
+            brackets.forEach(function (bracket) {
+              host.orderUpdate(bracket);
+              rememberSyncedOrder(bracket);
+            });
+          } catch (_) {}
+        }
+
+        function marketQuoteForPreview() {
+          var key = normalizeSymbolKey(
+            (previewOrder && previewOrder.symbol) || initialSymbol,
+          );
+          var q = nativeQuoteCache[key] || {};
+          return {
+            bid: Number(q.bid || q.lastValidBid) || 0,
+            ask: Number(q.ask || q.lastValidAsk) || 0,
+          };
+        }
+
+        function inferPreviewKind(side, price, bid, ask) {
+          var market = Number(side) === Side.Buy ? ask : bid;
+          if (!Number.isFinite(market) || market <= 0) return OrderType.Limit;
+          if (Number(side) === Side.Buy) {
+            return price < market ? OrderType.Limit : OrderType.Stop;
+          }
+          return price > market ? OrderType.Limit : OrderType.Stop;
+        }
+
+        function applyPreviewOpenPrice(nextPrice) {
+          if (!previewOrder || nextPrice == null) return;
+          var quote = marketQuoteForPreview();
+          var nextType = inferPreviewKind(
+            previewOrder.side,
+            nextPrice,
+            quote.bid,
+            quote.ask,
+          );
+          previewOrder.price = nextPrice;
+          previewOrder.type = nextType;
+          if (nextType === OrderType.Stop) {
+            previewOrder.stopPrice = nextPrice;
+            previewOrder.limitPrice = undefined;
+            previewOrder.typeText = 'Stop';
+          } else {
+            previewOrder.limitPrice = nextPrice;
+            previewOrder.stopPrice = undefined;
+            previewOrder.typeText = 'Limit';
+          }
+        }
+
+        /** Prefer limit/stop fields — TV updates those while `price` can lag mid-drag. */
+        function chartMainOrderDragPrice(order) {
+          if (!order) return undefined;
+          var t = Number(order.type);
+          if (t === OrderType.Stop) {
+            return toNullablePrice(order.stopPrice ?? order.price ?? order.limitPrice);
+          }
+          if (t === OrderType.Limit) {
+            return toNullablePrice(order.limitPrice ?? order.price ?? order.stopPrice);
+          }
+          return toNullablePrice(
+            order.price ?? order.limitPrice ?? order.stopPrice ?? order.avgPrice,
+          );
+        }
+
+        function emitPreviewChange(detail) {
+          postToNative({
+            type: 'ORDER_PREVIEW_CHANGE',
+            payload: detail || { source: 'chart' },
+          });
+        }
+
+        function previewChangeFromOrder() {
+          var type = Number(previewOrder && previewOrder.type) === OrderType.Stop ? 'stop' : 'limit';
+          var side = Number(previewOrder && previewOrder.side) === Side.Buy ? 'Buy' : 'Sell';
+          return {
+            source: 'chart',
+            price:
+              toNullablePrice(
+                (previewOrder && (previewOrder.price ?? previewOrder.limitPrice ?? previewOrder.stopPrice)) ||
+                  null,
+              ) ?? undefined,
+            stopLoss: toNullablePrice(previewOrder && previewOrder.stopLoss) ?? undefined,
+            takeProfit: toNullablePrice(previewOrder && previewOrder.takeProfit) ?? undefined,
+            type: type,
+            side: side,
+          };
+        }
+
+        function previewLineText() {
+          if (!previewOrder) return 'Pending';
+          var side = Number(previewOrder.side) === Side.Buy ? 'Buy' : 'Sell';
+          var kind = Number(previewOrder.type) === OrderType.Stop ? 'Stop' : 'Limit';
+          return side + ' ' + kind;
+        }
+
+        function previewLineColor() {
+          return Number(previewOrder && previewOrder.side) === Side.Buy ? '#26a69a' : '#ef5350';
+        }
+
+        function removePreviewOrderLine() {
+          if (previewOrderLine) {
+            try {
+              previewOrderLine.remove();
+            } catch (_) {}
+            previewOrderLine = null;
+          }
+          previewOrderLineReady = null;
+          removePreviewBracketLine('SL');
+          removePreviewBracketLine('TP');
+        }
+
+        function removePreviewBracketLine(kind) {
+          if (kind === 'SL') {
+            if (previewSlOrderLine) {
+              try {
+                previewSlOrderLine.remove();
+              } catch (_) {}
+              previewSlOrderLine = null;
+            }
+            previewSlOrderLineReady = null;
+          } else {
+            if (previewTpOrderLine) {
+              try {
+                previewTpOrderLine.remove();
+              } catch (_) {}
+              previewTpOrderLine = null;
+            }
+            previewTpOrderLineReady = null;
+          }
+        }
+
+        function previewBracketColor(kind) {
+          return kind === 'SL' ? '#f44336' : '#2196f3';
+        }
+
+        function stylePreviewBracketLine(line, kind) {
+          if (!line) return;
+          var color = previewBracketColor(kind);
+          try {
+            if (typeof line.setLineColor === 'function') line.setLineColor(color);
+            if (typeof line.setBodyBackgroundColor === 'function') {
+              line.setBodyBackgroundColor(color);
+            }
+            if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#ffffff');
+            if (typeof line.setQuantityBackgroundColor === 'function') {
+              line.setQuantityBackgroundColor(color);
+            }
+            if (typeof line.setQuantityTextColor === 'function') {
+              line.setQuantityTextColor('#ffffff');
+            }
+          } catch (_) {}
+        }
+
+        function defaultPreviewBracketPrice(kind) {
+          var base = Number(previewOrder && previewOrder.price) || 0;
+          if (!(base > 0)) return 0;
+          var isBuy = Number(previewOrder.side) === Side.Buy;
+          var delta = base * PREVIEW_BRACKET_OFFSET;
+          if (kind === 'SL') return isBuy ? Math.max(base - delta, delta) : base + delta;
+          return isBuy ? base + delta : Math.max(base - delta, delta);
+        }
+
+        function updatePreviewModifyHint(line) {
+          if (!line || !previewOrder) return;
+          var hasSl = previewOrder.stopLoss != null && Number(previewOrder.stopLoss) > 0;
+          var hasTp = previewOrder.takeProfit != null && Number(previewOrder.takeProfit) > 0;
+          var tip =
+            !hasSl && !hasTp
+              ? 'Add SL / TP'
+              : !hasSl
+                ? 'Add SL'
+                : !hasTp
+                  ? 'Add TP'
+                  : 'SL / TP set';
+          try {
+            if (typeof line.setModifyTooltip === 'function') line.setModifyTooltip(tip);
+          } catch (_) {}
+        }
+
+        function bindPreviewBracketHandlers(line, kind) {
+          if (!line) return;
+          try {
+            if (typeof line.setEditable === 'function') line.setEditable(true);
+            if (typeof line.setCancellable === 'function') line.setCancellable(true);
+            if (typeof line.setExtendLeft === 'function') line.setExtendLeft(false);
+            if (typeof line.setLineLength === 'function') line.setLineLength(70);
+            if (typeof line.setQuantity === 'function') line.setQuantity(kind);
+            if (typeof line.setText === 'function') line.setText(kind);
+            if (typeof line.setTooltip === 'function') line.setTooltip('Drag to set ' + kind);
+            if (typeof line.setCancelTooltip === 'function') {
+              line.setCancelTooltip('Remove ' + kind);
+            }
+            stylePreviewBracketLine(line, kind);
+            if (typeof line.onMoving === 'function') {
+              line.onMoving(function () {
+                if (!previewOrder) return;
+                var next = Number(line.getPrice());
+                if (!Number.isFinite(next) || next <= 0) return;
+                if (kind === 'SL') previewOrder.stopLoss = next;
+                else previewOrder.takeProfit = next;
+              });
+            }
+            if (typeof line.onMove === 'function') {
+              line.onMove(function () {
+                if (!previewOrder) return;
+                var next = Number(line.getPrice());
+                chartPreviewDebug('orderline.bracketMove', 'F', { kind: kind, next: next });
+                if (!Number.isFinite(next) || next <= 0) return;
+                if (kind === 'SL') previewOrder.stopLoss = next;
+                else previewOrder.takeProfit = next;
+                emitPreviewChange(previewChangeFromOrder());
+              });
+            }
+            if (typeof line.onCancel === 'function') {
+              line.onCancel(function () {
+                if (!previewOrder) return;
+                if (kind === 'SL') previewOrder.stopLoss = null;
+                else previewOrder.takeProfit = null;
+                removePreviewBracketLine(kind);
+                updatePreviewModifyHint(previewOrderLine);
+                chartPreviewDebug('orderline.bracketCancel', 'F', { kind: kind });
+                emitPreviewChange(previewChangeFromOrder());
+              });
+            }
+          } catch (_) {}
+        }
+
+        function ensurePreviewBracketLine(kind, price) {
+          var chart =
+            window.tvWidget && window.tvWidget.activeChart && window.tvWidget.activeChart();
+          if (!chart || typeof chart.createOrderLine !== 'function') return Promise.resolve(null);
+          if (!(price > 0)) return Promise.resolve(null);
+
+          var existing = kind === 'SL' ? previewSlOrderLine : previewTpOrderLine;
+          if (existing) {
+            try {
+              existing.setPrice(price);
+              bindPreviewBracketHandlers(existing, kind);
+            } catch (_) {}
+            return Promise.resolve(existing);
+          }
+
+          var pending = kind === 'SL' ? previewSlOrderLineReady : previewTpOrderLineReady;
+          if (pending) return pending;
+
+          var ready = Promise.resolve(chart.createOrderLine())
+            .then(function (line) {
+              if (kind === 'SL') {
+                previewSlOrderLine = line;
+                previewSlOrderLineReady = null;
+              } else {
+                previewTpOrderLine = line;
+                previewTpOrderLineReady = null;
+              }
+              try {
+                line.setPrice(price);
+              } catch (_) {}
+              bindPreviewBracketHandlers(line, kind);
+              return line;
+            })
+            .catch(function () {
+              if (kind === 'SL') previewSlOrderLineReady = null;
+              else previewTpOrderLineReady = null;
+              return null;
+            });
+          if (kind === 'SL') previewSlOrderLineReady = ready;
+          else previewTpOrderLineReady = ready;
+          return ready;
+        }
+
+        function syncPreviewBracketLines() {
+          if (!previewOrder) return;
+          var sl = Number(previewOrder.stopLoss);
+          var tp = Number(previewOrder.takeProfit);
+          if (sl > 0) ensurePreviewBracketLine('SL', sl);
+          else removePreviewBracketLine('SL');
+          if (tp > 0) ensurePreviewBracketLine('TP', tp);
+          else removePreviewBracketLine('TP');
+          updatePreviewModifyHint(previewOrderLine);
+        }
+
+        function addMissingPreviewBrackets() {
+          if (!previewOrder) return;
+          var added = [];
+          var hasSl = previewOrder.stopLoss != null && Number(previewOrder.stopLoss) > 0;
+          var hasTp = previewOrder.takeProfit != null && Number(previewOrder.takeProfit) > 0;
+          if (!hasSl) {
+            previewOrder.stopLoss = defaultPreviewBracketPrice('SL');
+            added.push('SL');
+          }
+          if (!hasTp) {
+            previewOrder.takeProfit = defaultPreviewBracketPrice('TP');
+            added.push('TP');
+          }
+          chartPreviewDebug('orderline.addBrackets', 'F', {
+            added: added,
+            stopLoss: previewOrder.stopLoss,
+            takeProfit: previewOrder.takeProfit,
+          });
+          syncPreviewBracketLines();
+          if (added.length) emitPreviewChange(previewChangeFromOrder());
+        }
+
+        function stylePreviewOrderLine(line) {
+          if (!line) return;
+          var color = previewLineColor();
+          try {
+            if (typeof line.setLineColor === 'function') line.setLineColor(color);
+            if (typeof line.setBodyBackgroundColor === 'function') {
+              line.setBodyBackgroundColor(color);
+            }
+            if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#ffffff');
+            if (typeof line.setQuantityBackgroundColor === 'function') {
+              line.setQuantityBackgroundColor(color);
+            }
+            if (typeof line.setQuantityTextColor === 'function') {
+              line.setQuantityTextColor('#ffffff');
+            }
+          } catch (_) {}
+        }
+
+        function bindPreviewOrderLineHandlers(line) {
+          if (!line) return;
+          try {
+            if (typeof line.setEditable === 'function') line.setEditable(true);
+            if (typeof line.setCancellable === 'function') line.setCancellable(true);
+            if (typeof line.setExtendLeft === 'function') line.setExtendLeft(false);
+            if (typeof line.setLineLength === 'function') line.setLineLength(80);
+            if (typeof line.setQuantity === 'function') {
+              line.setQuantity(String((previewOrder && previewOrder.qty) || 0.01));
+            }
+            if (typeof line.setText === 'function') line.setText(previewLineText());
+            if (typeof line.setTooltip === 'function') {
+              line.setTooltip('Drag to set pending price');
+            }
+            if (typeof line.setCancelTooltip === 'function') {
+              line.setCancelTooltip('Cancel preview');
+            }
+            updatePreviewModifyHint(line);
+            stylePreviewOrderLine(line);
+            if (typeof line.onModify === 'function') {
+              line.onModify(function () {
+                chartPreviewDebug('orderline.onModify', 'F', {
+                  hasSl: !!(previewOrder && previewOrder.stopLoss),
+                  hasTp: !!(previewOrder && previewOrder.takeProfit),
+                });
+                addMissingPreviewBrackets();
+              });
+            }
+            if (typeof line.onMoving === 'function') {
+              line.onMoving(function () {
+                if (!previewOrder || !previewOrderLine) return;
+                var next = Number(previewOrderLine.getPrice());
+                if (!Number.isFinite(next) || next <= 0) return;
+                applyPreviewOpenPrice(next);
+                if (typeof previewOrderLine.setText === 'function') {
+                  previewOrderLine.setText(previewLineText());
+                }
+                stylePreviewOrderLine(previewOrderLine);
+              });
+            }
+            if (typeof line.onMove === 'function') {
+              line.onMove(function () {
+                if (!previewOrder || !previewOrderLine) return;
+                var next = Number(previewOrderLine.getPrice());
+                chartPreviewDebug('orderline.onMove', 'A', { next: next });
+                if (!Number.isFinite(next) || next <= 0) return;
+                applyPreviewOpenPrice(next);
+                if (typeof previewOrderLine.setText === 'function') {
+                  previewOrderLine.setText(previewLineText());
+                }
+                stylePreviewOrderLine(previewOrderLine);
+                emitPreviewChange(previewChangeFromOrder());
+              });
+            }
+            if (typeof line.onCancel === 'function') {
+              line.onCancel(function () {
+                clearOrderPreview(true);
+              });
+            }
+          } catch (_) {}
+        }
+
+        function ensurePreviewOrderLine(price) {
+          var chart =
+            window.tvWidget && window.tvWidget.activeChart && window.tvWidget.activeChart();
+          if (!chart || typeof chart.createOrderLine !== 'function') {
+            chartPreviewDebug('orderline.unavailable', 'A', {});
+            return Promise.resolve(null);
+          }
+
+          if (previewOrderLine) {
+            try {
+              previewOrderLine.setPrice(price);
+              bindPreviewOrderLineHandlers(previewOrderLine);
+              if (typeof previewOrderLine.setText === 'function') {
+                previewOrderLine.setText(previewLineText());
+              }
+              if (typeof previewOrderLine.setQuantity === 'function') {
+                previewOrderLine.setQuantity(String((previewOrder && previewOrder.qty) || 0.01));
+              }
+            } catch (_) {}
+            syncPreviewBracketLines();
+            return Promise.resolve(previewOrderLine);
+          }
+
+          if (previewOrderLineReady) return previewOrderLineReady;
+
+          previewOrderLineReady = Promise.resolve(chart.createOrderLine())
+            .then(function (line) {
+              previewOrderLine = line;
+              previewOrderLineReady = null;
+              try {
+                line.setPrice(price);
+              } catch (_) {}
+              bindPreviewOrderLineHandlers(line);
+              syncPreviewBracketLines();
+              return line;
+            })
+            .catch(function () {
+              previewOrderLineReady = null;
+              return null;
+            });
+          return previewOrderLineReady;
+        }
+
+        function clearOrderPreview(notifyNative) {
+          removePreviewOrderLine();
+          if (previewOrder) {
+            var host = window.__bridgeBrokerHost;
+            if (host && typeof host.orderUpdate === 'function') {
+              try {
+                host.orderUpdate(
+                  Object.assign({}, previewOrder, { status: OrderStatus.Canceled }),
+                );
+              } catch (_) {}
+            }
+            ['TP', 'SL'].forEach(function (suffix) {
+              var id = PREVIEW_ORDER_ID + '_' + suffix;
+              var bracket = lastSyncedOrdersById[id];
+              if (bracket && host && typeof host.orderUpdate === 'function') {
+                try {
+                  host.orderUpdate(
+                    Object.assign({}, bracket, { status: OrderStatus.Canceled }),
+                  );
+                } catch (_) {}
+              }
+              forgetSyncedOrder(id);
+            });
+            forgetSyncedOrder(PREVIEW_ORDER_ID);
+          }
+          previewOrder = null;
+          syncTradingToHost();
+          if (notifyNative) emitPreviewChange({ source: 'chart_cancel' });
+        }
+
+        function setOrderPreview(payload) {
+          if (!payload) {
+            chartPreviewDebug('setOrderPreview.clear', 'E', {});
+            clearOrderPreview(false);
+            return;
+          }
+          var side = payload.side === 'Buy' ? Side.Buy : Side.Sell;
+          var orderType = payload.type === 'stop' ? OrderType.Stop : OrderType.Limit;
+          var price = Number(payload.price);
+          if (!Number.isFinite(price) || price <= 0) {
+            chartPreviewDebug('setOrderPreview.badPrice', 'B', { price: payload.price });
+            clearOrderPreview(false);
+            return;
+          }
+          // Remove any leftover createOrderLine overlay from older patches.
+          removePreviewOrderLine();
+          // Native broker order line (TradeSync) — TV draws +SL/+TP controls.
+          previewOrder = {
+            id: PREVIEW_ORDER_ID,
+            symbol: normalizeSymbolKey(payload.symbol || initialSymbol),
+            qty: Number(payload.volume) || 0.01,
+            side: side,
+            type: orderType,
+            price: price,
+            limitPrice: orderType === OrderType.Limit ? price : undefined,
+            stopPrice: orderType === OrderType.Stop ? price : undefined,
+            status: OrderStatus.Working,
+            supportModify: true,
+            supportMove: true,
+            editable: true,
+            supportModifyBrackets: true,
+            supportModifyOrderPrice: true,
+            stopLoss: toNullablePrice(payload.stopLoss),
+            takeProfit: toNullablePrice(payload.takeProfit),
+            text: payload.side === 'Buy' ? 'Buy' : 'Sell',
+            typeText: payload.type === 'stop' ? 'Stop' : 'Limit',
+            sideText: payload.side === 'Buy' ? 'Buy' : 'Sell',
+            qtyText: String(Number(payload.volume) || 0.01),
+          };
+          chartPreviewDebug('setOrderPreview.set', 'F', {
+            side: payload.side,
+            type: payload.type,
+            price: price,
+            via: 'broker',
+            supportModifyBrackets: true,
+          });
+          syncTradingToHost();
+        }
+
+        window.__previewUsesOrderLine = false;
+
+        function updatePreviewFromModification(orderId, data) {
+          if (!previewOrder) return;
+          previewDragging = true;
+          var parsed = parseSyntheticBracketId(orderId);
+          var quote =
+            chartMainOrderDragPrice(data) ??
+            chartBracketDragLinePrice(data) ??
+            toNullablePrice(data && (data.limitPrice ?? data.stopPrice ?? data.price));
+          var incomingPrice = toNullablePrice(quote);
+          if (parsed && parsed.bracket === 'TP') {
+            previewOrder.takeProfit = incomingPrice;
+          } else if (parsed && parsed.bracket === 'SL') {
+            previewOrder.stopLoss = incomingPrice;
+          } else {
+            if (incomingPrice != null) applyPreviewOpenPrice(incomingPrice);
+            if (data && data.takeProfit !== undefined) {
+              previewOrder.takeProfit = toNullablePrice(data.takeProfit);
+            }
+            if (data && data.stopLoss !== undefined) {
+              previewOrder.stopLoss = toNullablePrice(data.stopLoss);
+            }
+          }
+          patchPreviewOnHost();
+          emitPreviewChange(previewChangeFromOrder());
+          previewDragging = false;
+        }
+
+        function movePreviewOrder(orderId, price) {
+          if (!previewOrder) {
+            chartPreviewDebug('movePreviewOrder.noPreview', 'A', { orderId: String(orderId) });
+            return;
+          }
+          previewDragging = true;
+          var raw =
+            typeof price === 'number'
+              ? price
+              : price && typeof price === 'object'
+                ? chartMainOrderDragPrice(price) ?? chartBracketDragLinePrice(price)
+                : Number(price);
+          var next = toNullablePrice(raw);
+          if (next == null) {
+            chartPreviewDebug('movePreviewOrder.nullPrice', 'B', {
+              orderId: String(orderId),
+              priceType: typeof price,
+              raw: raw,
+            });
+            previewDragging = false;
+            return;
+          }
+          var parsed = parseSyntheticBracketId(orderId);
+          if (parsed && parsed.bracket === 'TP') {
+            previewOrder.takeProfit = next;
+          } else if (parsed && parsed.bracket === 'SL') {
+            previewOrder.stopLoss = next;
+          } else {
+            applyPreviewOpenPrice(next);
+          }
+          chartPreviewDebug('movePreviewOrder.ok', 'A', {
+            orderId: String(orderId),
+            next: next,
+            price: previewOrder.price,
+          });
+          patchPreviewOnHost();
+          emitPreviewChange(previewChangeFromOrder());
+          previewDragging = false;
+        }
+
+        function isPreviewOrderId(orderId) {
+          return String(orderId || '').indexOf(PREVIEW_ORDER_ID) === 0;
+        }
+
+        function toNullablePrice(value) {
+          if (value === null) return null;
+          if (value === undefined) return undefined;
+          var num = Number(value);
+          if (!Number.isFinite(num) || num <= 0) return null;
+          return num;
+        }
+
+        function mapOrderStatus(state) {
+          var status = String(state || '').toLowerCase();
+          if (status.includes('cancel')) return OrderStatus.Canceled;
+          if (status.includes('reject')) return OrderStatus.Rejected;
+          if (status.includes('fill')) return OrderStatus.Filled;
+          if (/^\d+$/.test(status)) {
+            var code = Number(status);
+            if (code === 2 || code === 4 || code === 5) return OrderStatus.Canceled;
+            if (code === 4) return OrderStatus.Filled;
+          }
+          return OrderStatus.Working;
+        }
+
+        function bracketOrderFields(parentId, parentType, bracket, price, qty, oppSide) {
+          var isSl = bracket === 'SL';
+          return {
+            id: parentId + '_' + bracket,
+            qty: qty,
+            side: oppSide,
+            type: isSl ? OrderType.Stop : OrderType.Limit,
+            status: OrderStatus.Working,
+            limitPrice: isSl ? undefined : price,
+            stopPrice: isSl ? price : undefined,
+            price: price,
+            parentId: parentId,
+            parentType: parentType,
+            supportModify: true,
+            supportMove: true,
+            supportCancel: true,
+            supportModifyOrderPrice: true,
+            editable: true,
+            text: bracket,
+            sideText: ' ',
+            typeText: ' ',
+            qtyText: ' ',
+          };
+        }
+
+        function extractBracketPrice(payload, kind) {
+          if (!payload) return undefined;
+          var root = payload.brackets && typeof payload.brackets === 'object' ? payload.brackets : payload;
+          if (kind === 'stopLoss') {
+            if (payload.stopLoss !== undefined) return toNullablePrice(payload.stopLoss);
+            if (root.stopLoss !== undefined) {
+              if (root.stopLoss === null) return null;
+              if (root.stopLoss.price !== undefined) return toNullablePrice(root.stopLoss.price);
+            }
+            if (root.sl !== undefined) {
+              if (root.sl === null) return null;
+              if (root.sl.price !== undefined) return toNullablePrice(root.sl.price);
+            }
+          } else {
+            if (payload.takeProfit !== undefined) return toNullablePrice(payload.takeProfit);
+            if (root.takeProfit !== undefined) {
+              if (root.takeProfit === null) return null;
+              if (root.takeProfit.price !== undefined) return toNullablePrice(root.takeProfit.price);
+            }
+            if (root.tp !== undefined) {
+              if (root.tp === null) return null;
+              if (root.tp.price !== undefined) return toNullablePrice(root.tp.price);
+            }
+          }
+          return undefined;
+        }
+
+        function extractModifyPayload(brackets, positionId) {
+          var resolvedId = resolvePositionParentId(positionId);
+          var current = livePositions.find(function (p) {
+            return String(p.id) === String(resolvedId);
+          });
+          var data = {};
+          var payload = brackets || {};
+          var nextSl = extractBracketPrice(payload, 'stopLoss');
+          var nextTp = extractBracketPrice(payload, 'takeProfit');
+          if (nextSl === undefined && payload.sl !== undefined) nextSl = toNullablePrice(payload.sl);
+          if (nextTp === undefined && payload.tp !== undefined) nextTp = toNullablePrice(payload.tp);
+          if (nextSl !== undefined) data.stopLoss = nextSl;
+          else if (current && current.stopLoss > 0) data.stopLoss = current.stopLoss;
+          if (nextTp !== undefined) data.takeProfit = nextTp;
+          else if (current && current.takeProfit > 0) data.takeProfit = current.takeProfit;
+          return data;
+        }
+
+        function patchLocalPosition(positionId, data) {
+          livePositions = livePositions.map(function (p) {
+            if (String(p.id) !== String(positionId)) return p;
+            var next = Object.assign({}, p);
+            if (data.stopLoss !== undefined) next.stopLoss = data.stopLoss || 0;
+            if (data.takeProfit !== undefined) next.takeProfit = data.takeProfit || 0;
+            return next;
+          });
+        }
+
+        function patchLocalOrder(orderId, data) {
+          liveOrders = liveOrders.map(function (o) {
+            if (String(o.id) !== String(orderId)) return o;
+            var next = Object.assign({}, o);
+            if (data.price !== undefined) next.price = data.price || 0;
+            if (data.stopLoss !== undefined) next.stopLoss = data.stopLoss || 0;
+            if (data.takeProfit !== undefined) next.takeProfit = data.takeProfit || 0;
+            return next;
+          });
+        }
+
+        function getOrderLabel(side, orderType) {
+          var sideLabel = side === Side.Buy ? 'Buy' : 'Sell';
+          var typeLabel = orderType === OrderType.Stop ? 'Stop' : 'Limit';
+          return sideLabel + ' ' + typeLabel;
+        }
+
+        function extractModifyOrderPayload(brackets, orderId) {
+          var current = liveOrders.find(function (o) {
+            return String(o.id) === String(orderId);
+          });
+          var data = {};
+          var nextSl = extractBracketPrice(brackets, 'stopLoss');
+          var nextTp = extractBracketPrice(brackets, 'takeProfit');
+          var nextPrice = toNullablePrice(
+            brackets && (brackets.price ?? brackets.limitPrice ?? brackets.stopPrice),
+          );
+          if (nextSl !== undefined) data.stopLoss = nextSl;
+          else if (current && current.stopLoss > 0) data.stopLoss = current.stopLoss;
+          if (nextTp !== undefined) data.takeProfit = nextTp;
+          else if (current && current.takeProfit > 0) data.takeProfit = current.takeProfit;
+          if (nextPrice != null) data.price = nextPrice;
+          else if (current && current.price > 0) data.price = current.price;
+          return data;
+        }
+
+        function mapPositionsForTv(positions) {
+          return (positions || []).map(function (p) {
+            var side = p.side === 'SELL' ? Side.Sell : Side.Buy;
+            var avgPrice = Number(p.openPrice) || 0;
+            var price = Number(p.currentPrice) || avgPrice;
+            var stopLoss = toNullablePrice(p.stopLoss);
+            var takeProfit = toNullablePrice(p.takeProfit);
+            var mapped = {
+              id: String(p.id),
+              symbol: normalizeSymbolKey(p.symbol),
+              qty: Number(p.lots) || 0.01,
+              side: side,
+              avgPrice: avgPrice,
+              price: price,
+              last: price,
+              pl: Number(p.profit) || 0,
+              supportModify: true,
+              supportMove: true,
+              editable: true,
+              supportModifyBrackets: true,
+            };
+            if (stopLoss != null) mapped.stopLoss = stopLoss;
+            if (takeProfit != null) mapped.takeProfit = takeProfit;
+            if (stopLoss != null || takeProfit != null) {
+              mapped.brackets = {};
+              if (stopLoss != null) mapped.brackets.stopLoss = { price: stopLoss };
+              if (takeProfit != null) mapped.brackets.takeProfit = { price: takeProfit };
+            }
+            return mapped;
+          });
+        }
+
+        function mapOrdersForTv(orders) {
+          return (orders || [])
+            .map(function (o) {
+              var side = o.side === 'SELL' ? Side.Sell : Side.Buy;
+              var orderType = o.orderType === 'STOP' ? OrderType.Stop : OrderType.Limit;
+              var price = Number(o.price) || 0;
+              if (price <= 0) return null;
+              var stopLoss = toNullablePrice(o.stopLoss);
+              var takeProfit = toNullablePrice(o.takeProfit);
+              var mapped = {
+                id: String(o.id),
+                symbol: normalizeSymbolKey(o.symbol),
+                qty: Number(o.lots) || 0.01,
+                side: side,
+                type: orderType,
+                price: price,
+                status: OrderStatus.Working,
+                supportModify: true,
+                supportMove: true,
+                editable: true,
+                supportModifyBrackets: true,
+                supportModifyOrderPrice: true,
+                text: getOrderLabel(side, orderType),
+                typeText: ' ',
+                sideText: ' ',
+              };
+              if (orderType === OrderType.Limit) mapped.limitPrice = price;
+              if (orderType === OrderType.Stop) mapped.stopPrice = price;
+              if (stopLoss != null) mapped.stopLoss = stopLoss;
+              if (takeProfit != null) mapped.takeProfit = takeProfit;
+              if (stopLoss != null || takeProfit != null) {
+                mapped.brackets = {};
+                if (stopLoss != null) mapped.brackets.stopLoss = { price: stopLoss };
+                if (takeProfit != null) mapped.brackets.takeProfit = { price: takeProfit };
+              }
+              return mapped;
+            })
+            .filter(Boolean);
+        }
+
+        function buildPositionBracketOrders(mappedPositions) {
+          var brackets = [];
+          mappedPositions.forEach(function (position) {
+            var parentId = String(position.id);
+            var qty = Number(position.qty) || 0.01;
+            var oppSide = Number(position.side) === Side.Buy ? Side.Sell : Side.Buy;
+            if (toNullablePrice(position.takeProfit) != null) {
+              var tp = bracketOrderFields(
+                parentId,
+                ParentType.Position,
+                'TP',
+                toNullablePrice(position.takeProfit),
+                qty,
+                oppSide,
+              );
+              tp.symbol = position.symbol;
+              brackets.push(tp);
+            }
+            if (toNullablePrice(position.stopLoss) != null) {
+              var sl = bracketOrderFields(
+                parentId,
+                ParentType.Position,
+                'SL',
+                toNullablePrice(position.stopLoss),
+                qty,
+                oppSide,
+              );
+              sl.symbol = position.symbol;
+              brackets.push(sl);
+            }
+          });
+          return brackets;
+        }
+
+        function buildOrderBracketOrders(mappedOrders) {
+          var brackets = [];
+          mappedOrders.forEach(function (order) {
+            var parentId = String(order.id);
+            var qty = Number(order.qty) || 0.01;
+            var oppSide = Number(order.side) === Side.Buy ? Side.Sell : Side.Buy;
+            if (toNullablePrice(order.takeProfit) != null) {
+              var otp = bracketOrderFields(
+                parentId,
+                ParentType.Order,
+                'TP',
+                toNullablePrice(order.takeProfit),
+                qty,
+                oppSide,
+              );
+              otp.symbol = order.symbol;
+              brackets.push(otp);
+            }
+            if (toNullablePrice(order.stopLoss) != null) {
+              var osl = bracketOrderFields(
+                parentId,
+                ParentType.Order,
+                'SL',
+                toNullablePrice(order.stopLoss),
+                qty,
+                oppSide,
+              );
+              osl.symbol = order.symbol;
+              brackets.push(osl);
+            }
+          });
+          return brackets;
+        }
+
+        function collectAllTvOrders() {
+          var mappedPositions = mapPositionsForTv(livePositions);
+          var mappedOrders = mapOrdersForTv(liveOrders);
+          return appendPreviewOrders(
+            mappedOrders
+              .concat(buildPositionBracketOrders(mappedPositions))
+              .concat(buildOrderBracketOrders(mappedOrders)),
+          );
+        }
+
+        function parseSyntheticBracketId(orderId) {
+          var match = String(orderId || '').match(/^(.+)_(SL|TP)$/i);
+          if (!match) return null;
+          return { parentId: match[1], bracket: match[2].toUpperCase() };
+        }
+
+        function inferBracketKind(order) {
+          if (!order) return '';
+          var id = String(order.id || '');
+          var parsed = parseSyntheticBracketId(id);
+          if (parsed) return parsed.bracket;
+          var text = String(order.text || order.typeText || '').trim().toUpperCase();
+          if (text === 'SL' || text === 'STOP LOSS' || text === 'STOPLOSS') return 'SL';
+          if (text === 'TP' || text === 'TAKE PROFIT' || text === 'TAKEPROFIT') return 'TP';
+          if (order.parentId != null) {
+            var maybeType = Number(order.type);
+            if (Number.isFinite(maybeType)) {
+              if (maybeType === OrderType.Stop) return 'SL';
+              if (maybeType === OrderType.Limit) return 'TP';
+            }
+            var tr = String(order.type || '').toLowerCase();
+            if (tr.indexOf('stop') >= 0 && tr.indexOf('limit') < 0 && tr.indexOf('stoplimit') < 0) return 'SL';
+            if (tr.indexOf('limit') >= 0 || tr.indexOf('take') >= 0) return 'TP';
+            var sp = toNullablePrice(order.stopPrice);
+            var lp = toNullablePrice(order.limitPrice);
+            if (sp != null && lp == null) return 'SL';
+            if (lp != null && sp == null) return 'TP';
+          }
+          var sl = extractBracketPrice(order, 'stopLoss');
+          var tp = extractBracketPrice(order, 'takeProfit');
+          if (sl !== undefined) return 'SL';
+          if (tp !== undefined) return 'TP';
+          return '';
+        }
+
+        function bracketTpSlFlags(parsed, inferred) {
+          if (parsed && parsed.bracket === 'SL') return { isSL: true, isTP: false };
+          if (parsed && parsed.bracket === 'TP') return { isSL: false, isTP: true };
+          if (inferred === 'SL') return { isSL: true, isTP: false };
+          if (inferred === 'TP') return { isSL: false, isTP: true };
+          return { isSL: false, isTP: false };
+        }
+
+        /** Live drag tick — REST runs on modifyOrder / moveOrder when drag ends. */
+        function applyBracketDragTick(orderId, price) {
+          var parsed = parseSyntheticBracketId(orderId);
+          if (!parsed || !Number.isFinite(price)) return;
+          var parentId = String(parsed.parentId);
+          var isSl = parsed.bracket === 'SL';
+          var next = toNullablePrice(price);
+          if (next == null) return;
+          var dragData = isSl ? { stopLoss: next } : { takeProfit: next };
+          if (liveOrders.some(function (o) { return String(o.id) === parentId; })) {
+            patchLocalOrder(parentId, dragData);
+          } else if (livePositions.some(function (p) { return String(p.id) === parentId; })) {
+            patchLocalPosition(parentId, dragData);
+          }
+          syncTradingToHost();
+        }
+
+        function chartLineOnOrderMove(order, nextPrice) {
+          if (!order || !Number.isFinite(nextPrice) || Number.isNaN(nextPrice)) return;
+          var id = String(order.id || '');
+          chartSltpDebug('chartLineOnOrderMove', {
+            id: id,
+            parentId: order.parentId,
+            nextPrice: nextPrice,
+          });
+          if (isPreviewOrderId(id)) {
+            movePreviewOrder(id, nextPrice);
+            return;
+          }
+          if (parseSyntheticBracketId(id)) {
+            applyBracketDragTick(id, nextPrice);
+            return;
+          }
+          if (order.parentId == null) return;
+          var inferred = inferBracketKind(order);
+          var flags = bracketTpSlFlags(parseSyntheticBracketId(id), inferred);
+          if (!flags.isSL && !flags.isTP) return;
+          var pid = hasLiveOrderId(order.parentId)
+            ? resolveOrderParentId(order.parentId)
+            : resolvePositionParentId(order.parentId);
+          var syntheticId = flags.isSL ? pid + '_SL' : pid + '_TP';
+          applyBracketDragTick(syntheticId, nextPrice);
+        }
+
+        function chartBracketDragLinePrice(order) {
+          if (!order) return undefined;
+          var parsed = parseSyntheticBracketId(String(order.id || ''));
+          if (parsed) {
+            if (parsed.bracket === 'SL') {
+              return toNullablePrice(order.stopPrice ?? order.price);
+            }
+            return toNullablePrice(order.limitPrice ?? order.price);
+          }
+          if (order.parentId != null) {
+            var t = Number(order.type);
+            var lp = toNullablePrice(order.limitPrice);
+            var sp = toNullablePrice(order.stopPrice);
+            var chain;
+            if (t === OrderType.Stop) {
+              chain = [order.stopPrice, order.limitPrice, order.price, order.avgPrice];
+            } else if (t === OrderType.Limit) {
+              chain = [order.limitPrice, order.stopPrice, order.price, order.avgPrice];
+            } else if (sp != null && lp == null) {
+              chain = [order.stopPrice, order.price, order.avgPrice, order.limitPrice];
+            } else if (lp != null && sp == null) {
+              chain = [order.limitPrice, order.price, order.avgPrice, order.stopPrice];
+            } else {
+              chain = [order.price, order.avgPrice, order.limitPrice, order.stopPrice];
+            }
+            for (var i = 0; i < chain.length; i++) {
+              var n = toNullablePrice(chain[i]);
+              if (n != null) return n;
+            }
+            return undefined;
+          }
+          return chartMainOrderDragPrice(order);
+        }
+
+        function applyTradingSync(positions, orders) {
+          livePositions = Array.isArray(positions) ? positions.slice() : [];
+          liveOrders = Array.isArray(orders) ? orders.slice() : [];
+          syncTradingToHost();
+        }
+
+        BridgeBroker.prototype.connectionStatus = function () {
+          return ConnectionStatus.Connected;
+        };
+
+        BridgeBroker.prototype.currentAccount = function () {
+          return 'mt5';
+        };
+
+        BridgeBroker.prototype.accountMetainfo = function () {
+          return {
+            id: 'mt5',
+            name: 'MT5 Account',
+            currency: 'USD',
+            type: 'live',
+            config: bridgeAccountConfig(),
+          };
+        };
+
+        BridgeBroker.prototype.accountInfo = function () {
+          return this.accountMetainfo();
+        };
+
+        BridgeBroker.prototype.accountsMetainfo = function () {
+          return Promise.resolve([this.accountMetainfo()]);
+        };
+
+        BridgeBroker.prototype.isTradable = function () {
+          return Promise.resolve(true);
+        };
+
+        BridgeBroker.prototype.supportPositionBrackets = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportOrderBrackets = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportModifyPosition = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportModifyOrder = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportMovePosition = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportMoveOrder = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportDragToModify = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportModifyPositionBrackets = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportModifyOrderBrackets = function () {
+          return Promise.resolve(true);
+        };
+        BridgeBroker.prototype.supportAddBracketsToExistingOrder = function () {
+          return Promise.resolve(true);
+        };
+
+        BridgeBroker.prototype.symbolInfo = function (symbol) {
+          return Promise.resolve({
+            qty: { min: 0.01, max: 100, step: 0.01 },
+            pipValue: 1,
+            pipSize: symbol.indexOf('BTC') >= 0 ? 0.01 : 0.00001,
+            minTick: symbol.indexOf('BTC') >= 0 ? 0.01 : 0.00001,
+            description: symbol,
+          });
+        };
+
+        BridgeBroker.prototype.orders = function () {
+          return Promise.resolve(collectAllTvOrders());
+        };
+
+        BridgeBroker.prototype.positions = function () {
+          return Promise.resolve(mapPositionsForTv(livePositions));
+        };
+
+        BridgeBroker.prototype.executions = function () {
+          return Promise.resolve([]);
+        };
+
+        BridgeBroker.prototype.placeOrder = function (order) {
+          if (order && order.parentId != null) {
+            return Promise.resolve({});
+          }
+
+          var orderType = order && order.type != null ? Number(order.type) : OrderType.Market;
+          var requestId = 'ord-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+          var side = Number(order.side) === Side.Buy ? 'BUY' : 'SELL';
+          var stopLoss = extractBracketPrice(order, 'stopLoss');
+          var takeProfit = extractBracketPrice(order, 'takeProfit');
+          if (stopLoss === undefined && order.stopLoss != null) {
+            stopLoss = toNullablePrice(order.stopLoss);
+          }
+          if (takeProfit === undefined && order.takeProfit != null) {
+            takeProfit = toNullablePrice(order.takeProfit);
+          }
+
+          if (orderType === OrderType.Limit || orderType === OrderType.Stop) {
+            var pendingPrice = toNullablePrice(
+              order.price ?? order.limitPrice ?? order.stopPrice,
+            );
+            if (pendingPrice == null || pendingPrice <= 0) {
+              return Promise.reject(new Error('Pending order price is required.'));
+            }
+            return new Promise(function (resolve, reject) {
+              orderCallbacks[requestId] = { resolve: resolve, reject: reject };
+              postToNative({
+                type: 'PLACE_PENDING_ORDER',
+                payload: {
+                  requestId: requestId,
+                  symbol: tradingSymbol,
+                  side: side,
+                  orderType: orderType === OrderType.Limit ? 'LIMIT' : 'STOP',
+                  price: pendingPrice,
+                  lots: (function () {
+                    var nativeLots = Number(window.__chartTradingLots);
+                    if (Number.isFinite(nativeLots) && nativeLots > 0) return nativeLots;
+                    return Number(order.qty || 0.01);
+                  })(),
+                  stopLoss: stopLoss != null ? stopLoss : null,
+                  takeProfit: takeProfit != null ? takeProfit : null,
+                },
+              });
+              setTimeout(function () {
+                if (!orderCallbacks[requestId]) return;
+                delete orderCallbacks[requestId];
+                reject(new Error('Order request timed out'));
+              }, 20000);
+            });
+          }
+
+          if (orderType !== OrderType.Market) {
+            return Promise.reject(new Error('Unsupported order type from chart.'));
+          }
+
+          return new Promise(function (resolve, reject) {
+            orderCallbacks[requestId] = { resolve: resolve, reject: reject };
+            postToNative({
+              type: 'PLACE_ORDER',
+              payload: {
+                requestId: requestId,
+                symbol: tradingSymbol,
+                side: side,
+                lots: (function () {
+                  var nativeLots = Number(window.__chartTradingLots);
+                  if (Number.isFinite(nativeLots) && nativeLots > 0) return nativeLots;
+                  return Number(order.qty || 0.01);
+                })(),
+                stopLoss: stopLoss != null ? stopLoss : null,
+                takeProfit: takeProfit != null ? takeProfit : null,
+              },
+            });
+            setTimeout(function () {
+              if (!orderCallbacks[requestId]) return;
+              delete orderCallbacks[requestId];
+              reject(new Error('Order request timed out'));
+            }, 20000);
+          });
+        };
+
+        BridgeBroker.prototype.modifyPosition = function (positionId, brackets) {
+          var resolvedId = resolvePositionParentId(positionId);
+          var data = extractModifyPayload(brackets, resolvedId);
+          var requestId = 'mod-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+          chartSltpDebug('modifyPosition', {
+            positionId: String(positionId),
+            resolvedId: resolvedId,
+            brackets: brackets,
+            apiPayload: data,
+            livePositionIds: livePositions.map(function (p) {
+              return String(p.id);
+            }),
+          });
+          if (data.stopLoss === undefined && data.takeProfit === undefined) {
+            chartSltpDebug('modifyPosition.skipped.empty', { positionId: resolvedId, brackets: brackets });
+            return Promise.resolve();
+          }
+          patchLocalPosition(resolvedId, data);
+          syncTradingToHost();
+          return new Promise(function (resolve, reject) {
+            modifyCallbacks[requestId] = { resolve: resolve, reject: reject };
+            var modPayload = {
+              requestId: requestId,
+              positionId: String(resolvedId),
+            };
+            if (data.stopLoss !== undefined) modPayload.stopLoss = data.stopLoss;
+            if (data.takeProfit !== undefined) modPayload.takeProfit = data.takeProfit;
+            postToNative({
+              type: 'MODIFY_POSITION',
+              payload: modPayload,
+            });
+            setTimeout(function () {
+              if (!modifyCallbacks[requestId]) return;
+              delete modifyCallbacks[requestId];
+              reject(new Error('Modify position timed out'));
+            }, 20000);
+          });
+        };
+
+        BridgeBroker.prototype.editPositionBrackets = function (positionId, brackets) {
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.modifyPositionBrackets = function (positionId, brackets) {
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.editIndividualPositionBrackets = function (positionId, brackets) {
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.setPositionBrackets = function (positionId, brackets) {
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.cancelPositionBrackets = function (positionId, brackets) {
+          var resolvedId = resolvePositionParentId(positionId);
+          var payload = brackets || {};
+          var parsed = parseSyntheticBracketId(String(payload.id || ''));
+          var inferred = inferBracketKind(payload);
+          var flags = bracketTpSlFlags(parsed, inferred);
+          var next = {};
+          if (flags.isSL) next.stopLoss = null;
+          else if (flags.isTP) next.takeProfit = null;
+          else {
+            var bracketRoot =
+              payload.brackets && typeof payload.brackets === 'object' ? payload.brackets : payload;
+            if (payload.stopLoss !== undefined || payload.sl !== undefined || bracketRoot.stopLoss) {
+              next.stopLoss = null;
+            }
+            if (payload.takeProfit !== undefined || payload.tp !== undefined || bracketRoot.takeProfit) {
+              next.takeProfit = null;
+            }
+            if (next.stopLoss === undefined && next.takeProfit === undefined) {
+              next.stopLoss = null;
+              next.takeProfit = null;
+            }
+          }
+          chartSltpDebug('cancelPositionBrackets', { positionId: resolvedId, next: next, brackets: brackets });
+          return this.modifyPosition(resolvedId, next);
+        };
+
+        BridgeBroker.prototype.modifyPendingOrder = function (orderId, data) {
+          var requestId = 'ordmod-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+          patchLocalOrder(orderId, data);
+          syncTradingToHost();
+          return new Promise(function (resolve, reject) {
+            orderModifyCallbacks[requestId] = { resolve: resolve, reject: reject };
+            var ordPayload = {
+              requestId: requestId,
+              orderId: String(orderId),
+            };
+            if (data.price !== undefined) ordPayload.price = data.price;
+            if (data.stopLoss !== undefined) {
+              ordPayload.stopLoss = data.stopLoss;
+            }
+            if (data.takeProfit !== undefined) {
+              ordPayload.takeProfit = data.takeProfit;
+            }
+            postToNative({
+              type: 'MODIFY_ORDER',
+              payload: ordPayload,
+            });
+            setTimeout(function () {
+              if (!orderModifyCallbacks[requestId]) return;
+              delete orderModifyCallbacks[requestId];
+              reject(new Error('Modify order timed out'));
+            }, 20000);
+          });
+        };
+
+        BridgeBroker.prototype.closePosition = function (positionId, amount) {
+          var requestId = 'close-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+          var lots = amount != null && Number.isFinite(Number(amount)) ? Number(amount) : null;
+          return new Promise(function (resolve, reject) {
+            closePositionCallbacks[requestId] = { resolve: resolve, reject: reject };
+            postToNative({
+              type: 'CLOSE_POSITION',
+              payload: {
+                requestId: requestId,
+                positionId: String(positionId),
+                lots: lots,
+              },
+            });
+            setTimeout(function () {
+              if (!closePositionCallbacks[requestId]) return;
+              delete closePositionCallbacks[requestId];
+              reject(new Error('Close position timed out'));
+            }, 20000);
+          });
+        };
+
+        BridgeBroker.prototype.cancelPendingOrder = function (orderId) {
+          var requestId = 'ordcancel-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+          return new Promise(function (resolve, reject) {
+            orderCancelCallbacks[requestId] = { resolve: resolve, reject: reject };
+            postToNative({
+              type: 'CANCEL_ORDER',
+              payload: { requestId: requestId, orderId: String(orderId) },
+            });
+            setTimeout(function () {
+              if (!orderCancelCallbacks[requestId]) return;
+              delete orderCancelCallbacks[requestId];
+              reject(new Error('Cancel order timed out'));
+            }, 20000);
+          });
+        };
+
+        BridgeBroker.prototype.moveOrder = function (orderId, priceOrOrder) {
+          if (isPreviewOrderId(orderId)) {
+            chartPreviewDebug('moveOrder.preview', 'A', {
+              orderId: String(orderId),
+              argType: typeof priceOrOrder,
+            });
+            movePreviewOrder(String(orderId), priceOrOrder);
+            return Promise.resolve();
+          }
+          var movedOrder =
+            priceOrOrder && typeof priceOrOrder === 'object' ? priceOrOrder : null;
+          var newPrice =
+            typeof priceOrOrder === 'number'
+              ? priceOrOrder
+              : chartBracketDragLinePrice(movedOrder);
+          var next = toNullablePrice(newPrice);
+          var parsedFromArg = parseSyntheticBracketId(String(orderId || ''));
+          var parsedFromMoved =
+            movedOrder && movedOrder.id != null
+              ? parseSyntheticBracketId(String(movedOrder.id))
+              : null;
+          var parsed = parsedFromArg || parsedFromMoved;
+          var inferred = inferBracketKind(movedOrder || {});
+          var flags = bracketTpSlFlags(parsed, inferred);
+          var parentIdRaw =
+            (parsed && parsed.parentId) ||
+            (movedOrder && movedOrder.parentId != null ? String(movedOrder.parentId) : '');
+          chartSltpDebug('moveOrder', {
+            orderId: String(orderId || ''),
+            movedOrderId: movedOrder && movedOrder.id,
+            parentIdRaw: parentIdRaw,
+            inferred: inferred,
+            flags: flags,
+            next: next,
+          });
+          if (!(flags.isSL || flags.isTP) || !parentIdRaw || next == null) {
+            return Promise.resolve();
+          }
+          var orderParentId = resolveOrderParentId(parentIdRaw);
+          var positionParentId = resolvePositionParentId(parentIdRaw);
+          var brackets = flags.isSL ? { stopLoss: next } : { takeProfit: next };
+          if (
+            movedOrder &&
+            Number(movedOrder.parentType) === ParentType.Order &&
+            hasLiveOrderId(orderParentId)
+          ) {
+            return this.modifyPendingOrder(orderParentId, brackets);
+          }
+          if (hasLivePositionId(positionParentId)) {
+            return this.modifyPosition(positionParentId, brackets);
+          }
+          if (hasLiveOrderId(orderParentId)) {
+            return this.modifyPendingOrder(orderParentId, brackets);
+          }
+          chartSltpDebug('moveOrder.unresolvedParent', { parentId: parentId, parentIdRaw: parentIdRaw });
+          return Promise.resolve();
+        };
+
+        BridgeBroker.prototype.movePosition = function (positionId, brackets) {
+          chartSltpDebug('movePosition', { positionId: positionId, brackets: brackets });
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.movePositionBrackets = function (positionId, brackets) {
+          chartSltpDebug('movePositionBrackets', { positionId: positionId, brackets: brackets });
+          return this.modifyPosition(positionId, brackets);
+        };
+
+        BridgeBroker.prototype.editOrder = function (orderId, data) {
+          chartSltpDebug('editOrder', { orderId: orderId, data: data });
+          return this.modifyOrder(orderId, data);
+        };
+
+        BridgeBroker.prototype.editIndividualOrderBrackets = function (orderId, brackets) {
+          chartSltpDebug('editIndividualOrderBrackets', { orderId: orderId, brackets: brackets });
+          return this.modifyOrder(orderId, brackets);
+        };
+
+        BridgeBroker.prototype.setOrderBrackets = function (orderId, brackets) {
+          chartSltpDebug('setOrderBrackets', { orderId: orderId, brackets: brackets });
+          return this.modifyOrder(orderId, brackets);
+        };
+
+        BridgeBroker.prototype.modifyOrderBrackets = function (orderId, brackets) {
+          chartSltpDebug('modifyOrderBrackets', { orderId: orderId, brackets: brackets });
+          return this.modifyOrder(orderId, brackets);
+        };
+
+        BridgeBroker.prototype.editOrderBrackets = function (orderId, brackets) {
+          chartSltpDebug('editOrderBrackets', { orderId: orderId, brackets: brackets });
+          return this.modifyOrder(orderId, brackets);
+        };
+
+        BridgeBroker.prototype.modifyOrder = function (orderId, maybeData) {
+          var order = maybeData;
+          if (orderId && typeof orderId === 'object' && maybeData === undefined) {
+            order = orderId;
+            orderId = order.id;
+          }
+          if (!order || typeof order !== 'object') order = {};
+
+          var id = String(orderId != null ? orderId : order.id || '');
+          chartSltpDebug('modifyOrder.called', {
+            id: id,
+            parentId: order.parentId,
+            parentType: order.parentType,
+            type: order.type,
+            stopPrice: order.stopPrice,
+            limitPrice: order.limitPrice,
+            price: order.price,
+          });
+
+          if (isPreviewOrderId(id)) {
+            chartPreviewDebug('modifyOrder.preview', 'A', {
+              id: id,
+              price: order.price,
+              limitPrice: order.limitPrice,
+              stopPrice: order.stopPrice,
+            });
+            updatePreviewFromModification(id, order);
+            return Promise.resolve();
+          }
+
+          if (order.parentId != null) {
+            var parsedParent = parseSyntheticBracketId(id);
+            var inferredParent = inferBracketKind(order);
+            var parentFlags = bracketTpSlFlags(parsedParent, inferredParent);
+            var linePrice = chartBracketDragLinePrice(order);
+            var mod = {};
+            if (parentFlags.isSL && linePrice != null) mod.stopLoss = linePrice;
+            if (parentFlags.isTP && linePrice != null) mod.takeProfit = linePrice;
+            if (
+              Object.keys(mod).length === 0 &&
+              linePrice != null &&
+              Number.isFinite(Number(linePrice))
+            ) {
+              if (parsedParent && parsedParent.bracket === 'SL') mod.stopLoss = linePrice;
+              else if (parsedParent && parsedParent.bracket === 'TP') mod.takeProfit = linePrice;
+              else if (Number(order.type) === OrderType.Stop) mod.stopLoss = linePrice;
+              else if (Number(order.type) === OrderType.Limit) mod.takeProfit = linePrice;
+            }
+            if (mod.stopLoss === undefined) {
+              var dragSl = toNullablePrice(order.stopPrice ?? order.stopLoss);
+              if (dragSl != null) mod.stopLoss = dragSl;
+            }
+            if (mod.takeProfit === undefined) {
+              var dragTp = toNullablePrice(order.limitPrice ?? order.takeProfit);
+              if (dragTp != null) mod.takeProfit = dragTp;
+            }
+            var orderParentId = resolveOrderParentId(order.parentId);
+            var positionParentId = resolvePositionParentId(order.parentId);
+            chartSltpDebug('modifyOrder.parentBracket', {
+              orderParentId: orderParentId,
+              positionParentId: positionParentId,
+              mod: mod,
+              inferredParent: inferredParent,
+              parentFlags: parentFlags,
+            });
+            if (Object.keys(mod).length === 0) {
+              chartSltpDebug('modifyOrder.parentBracket.emptyMod', { order: order });
+              return Promise.resolve();
+            }
+            if (Number(order.parentType) === ParentType.Position || hasLivePositionId(positionParentId)) {
+              return this.modifyPosition(positionParentId, mod);
+            }
+            if (Number(order.parentType) === ParentType.Order || hasLiveOrderId(orderParentId)) {
+              return this.modifyPendingOrder(orderParentId, mod);
+            }
+            chartSltpDebug('modifyOrder.parentNotFound', {
+              orderParentId: orderParentId,
+              positionParentId: positionParentId,
+            });
+            return Promise.resolve();
+          }
+
+          var parsed = parseSyntheticBracketId(id);
+          if (parsed) {
+            var linePrice = chartBracketDragLinePrice(order);
+            var brackets = {};
+            if (parsed.bracket === 'SL') brackets.stopLoss = linePrice;
+            else brackets.takeProfit = linePrice;
+            if (hasLivePositionId(parsed.parentId)) {
+              return this.modifyPosition(resolvePositionParentId(parsed.parentId), brackets);
+            }
+            if (hasLiveOrderId(parsed.parentId)) {
+              return this.modifyPendingOrder(resolveOrderParentId(parsed.parentId), brackets);
+            }
+          }
+          var pendingParent = id;
+          if (liveOrders.some(function (o) { return String(o.id) === pendingParent; })) {
+            var dragPrice = chartBracketDragLinePrice(order);
+            var payload = extractModifyOrderPayload(order || {}, pendingParent);
+            if (dragPrice != null) payload.price = dragPrice;
+            return this.modifyPendingOrder(pendingParent, payload);
+          }
+          return Promise.resolve();
+        };
+
+        BridgeBroker.prototype.cancelOrderBrackets = function (orderId, brackets) {
+          var parsed = parseSyntheticBracketId(String(orderId));
+          if (parsed) {
+            return this.cancelOrder(String(orderId));
+          }
+          var payload = brackets || {};
+          var next = {};
+          if (payload.stopLoss !== undefined || payload.sl !== undefined) next.stopLoss = null;
+          if (payload.takeProfit !== undefined || payload.tp !== undefined) next.takeProfit = null;
+          if (next.stopLoss === undefined && next.takeProfit === undefined) {
+            next.stopLoss = null;
+            next.takeProfit = null;
+          }
+          chartSltpDebug('cancelOrderBrackets', { orderId: orderId, next: next });
+          return this.modifyPendingOrder(String(orderId), next);
+        };
+
+        BridgeBroker.prototype.cancelOrder = function (orderId) {
+          if (isPreviewOrderId(orderId)) {
+            clearOrderPreview(true);
+            return Promise.resolve();
+          }
+          var parsed = parseSyntheticBracketId(orderId);
+          if (parsed) {
+            var orderParentId = resolveOrderParentId(parsed.parentId);
+            var positionParentId = resolvePositionParentId(parsed.parentId);
+            var clearBrackets = {};
+            if (parsed.bracket === 'SL') clearBrackets.stopLoss = null;
+            else clearBrackets.takeProfit = null;
+            chartSltpDebug('cancelOrder.syntheticBracket', {
+              orderId: orderId,
+              orderParentId: orderParentId,
+              positionParentId: positionParentId,
+              bracket: parsed.bracket,
+              clearBrackets: clearBrackets,
+            });
+            if (hasLivePositionId(positionParentId)) {
+              return this.modifyPosition(positionParentId, clearBrackets);
+            }
+            if (hasLiveOrderId(orderParentId)) {
+              return this.modifyPendingOrder(orderParentId, clearBrackets);
+            }
+          }
+          if (liveOrders.some(function (o) { return String(o.id) === String(orderId); })) {
+            return this.cancelPendingOrder(orderId);
+          }
+          return Promise.resolve();
+        };
+
+        BridgeBroker.prototype.accountManagerInfo = function () {
+          return {
+            accountTitle: 'MT5',
+            summary: [],
+            orderColumns: [],
+            positionColumns: [],
+            pages: [],
+            contextMenuActions: function () {
+              return Promise.resolve([]);
+            },
+          };
+        };
+
+        BridgeBroker.prototype.chartContextMenuActions = function () {
+          return Promise.resolve([]);
+        };
+
+        function handleNativeMessage(raw) {
+          var message;
+          try {
+            message = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          } catch (_) {
+            return;
+          }
+
+          if (message.type === 'history') {
+            var historyPayload = message.payload || {};
+            applyHistory(
+              historyPayload.symbol || initialSymbol,
+              historyPayload.resolution || activeResolution,
+              historyPayload.candles || [],
+              historyPayload.serverTimeOffset,
+            );
+            return;
+          }
+
+          if (message.type === 'update') {
+            var updatePayload = message.payload || {};
+            applyUpdate(
+              updatePayload.symbol || initialSymbol,
+              updatePayload.resolution || activeResolution,
+              updatePayload.candle || updatePayload,
+              updatePayload.serverTimeOffset,
+            );
+            return;
+          }
+
+          if (message.type === 'quote') {
+            applyQuote(message.payload || {});
+            return;
+          }
+
+          if (message.type === 'trading_sync') {
+            var syncPayload = message.payload || {};
+            applyTradingSync(syncPayload.positions || [], syncPayload.orders || []);
+            return;
+          }
+
+          if (message.type === 'SET_ORDER_PREVIEW') {
+            setOrderPreview(message.payload || null);
+            return;
+          }
+
+          if (message.type === 'MODIFY_POSITION_RESULT') {
+            var modResult = message.payload || {};
+            var modPending = modifyCallbacks[modResult.requestId];
+            if (!modPending) return;
+            delete modifyCallbacks[modResult.requestId];
+            if (modResult.success) {
+              modPending.resolve();
+            } else {
+              modPending.reject(new Error(modResult.error || 'Modify position failed'));
+            }
+            return;
+          }
+
+          if (message.type === 'ORDER_RESULT') {
+            var result = message.payload || {};
+            var pending = orderCallbacks[result.requestId];
+            if (!pending) return;
+            delete orderCallbacks[result.requestId];
+            if (result.success) {
+              pending.resolve({ orderId: result.requestId });
+            } else {
+              pending.reject(new Error(result.error || 'Order failed'));
+            }
+            return;
+          }
+
+          if (message.type === 'MODIFY_ORDER_RESULT') {
+            var modOrder = message.payload || {};
+            var modPending = orderModifyCallbacks[modOrder.requestId];
+            if (!modPending) return;
+            delete orderModifyCallbacks[modOrder.requestId];
+            if (modOrder.success) modPending.resolve();
+            else modPending.reject(new Error(modOrder.error || 'Modify order failed'));
+            return;
+          }
+
+          if (message.type === 'CANCEL_ORDER_RESULT') {
+            var cancelResult = message.payload || {};
+            var cancelPending = orderCancelCallbacks[cancelResult.requestId];
+            if (!cancelPending) return;
+            delete orderCancelCallbacks[cancelResult.requestId];
+            if (cancelResult.success) cancelPending.resolve();
+            else cancelPending.reject(new Error(cancelResult.error || 'Cancel order failed'));
+            return;
+          }
+
+          if (message.type === 'CLOSE_POSITION_RESULT') {
+            var closeResult = message.payload || {};
+            var closePending = closePositionCallbacks[closeResult.requestId];
+            if (!closePending) return;
+            delete closePositionCallbacks[closeResult.requestId];
+            if (closeResult.success) closePending.resolve();
+            else closePending.reject(new Error(closeResult.error || 'Close position failed'));
+          }
+        }
+
+        window.__nativeMessageQueue = [];
+        window.__handleNativeChartMessage = function (raw) {
+          if (!window.__tvBridgeReady) {
+            window.__nativeMessageQueue.push(raw);
+            return;
+          }
+          handleNativeMessage(raw);
+        };
+
+        window.addEventListener('message', function (event) {
+          window.__handleNativeChartMessage(event.data);
+        });
+        document.addEventListener('message', function (event) {
+          window.__handleNativeChartMessage(event.data);
+        });
+
+        var widget = (window.tvWidget = new TradingView.widget({
+          symbol: initialSymbol,
+          interval: initialInterval,
+          container: 'tv_chart_container',
+          library_path: 'charting_library/',
+          locale: 'en',
+          theme: initialTheme,
+          fullscreen: true,
+          autosize: true,
+          datafeed: new BridgeDatafeed(),
+          broker_factory: function (host) {
+            window.__bridgeBrokerHost = host;
+            bypassHostConfirmDialogs(host);
+            if (host && typeof host.sellBuyButtonsVisibility === 'function') {
+              var sellBuyVisibility = host.sellBuyButtonsVisibility();
+              if (sellBuyVisibility && typeof sellBuyVisibility.setValue === 'function') {
+                sellBuyVisibility.setValue(false);
+              }
+            }
+            var broker = wrapBrokerForSltpDebug(new BridgeBroker(host));
+            window.__bridgeBroker = broker;
+            chartSltpDebug('broker_factory.ready', { hasHost: !!host });
+            return broker;
+          },
+          widgetbar: {
+            details: false,
+            news: false,
+            watchlist: false,
+            datawindow: false,
+            trading: true,
+          },
+          broker_config: {
+            configFlags: {
+              supportPositions: true,
+              supportNativeReversePosition: false,
+              supportClosePosition: true,
+              supportCloseOrder: true,
+              supportPLUpdate: true,
+              supportMovePosition: true,
+              supportLevel2Data: false,
+              showQuantityInsteadOfAmount: true,
+              supportEditAmount: true,
+              supportOrderBrackets: true,
+              supportMarketBrackets: true,
+              supportPositionBrackets: true,
+              supportIndividualPositionBrackets: true,
+              supportModifyPosition: true,
+              supportModifyPositionBrackets: true,
+              supportModifyOrderBrackets: true,
+              supportCancelPositionBrackets: true,
+              supportStopLoss: true,
+              supportDragToModify: true,
+              supportOrdersHistory: false,
+              supportMarketOrders: true,
+              supportOrders: true,
+              supportModifyOrder: true,
+              supportModifyOrderBrackets: true,
+              supportCancelOrder: true,
+              supportModifyOrderPrice: true,
+              supportMoveOrder: true,
+              supportAddBracketsToExistingOrder: true,
+              supportCancelOrderBrackets: true,
+              supportPlaceOrderPreview: true,
+              supportMultiposition: true,
+              supportCancelBrackets: true,
+            },
+            durations: [{ name: 'GTC', value: 'GTC' }],
+            customUI: {
+              showClosePositionDialog: function (position) {
+                var id =
+                  position && (position.id != null ? position.id : position.ticket != null ? position.ticket : position);
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(false);
+                void window.__bridgeBroker.closePosition(String(id));
+                return Promise.resolve(true);
+              },
+              showCancelOrderDialog: function (order) {
+                var id = order && (order.id != null ? order.id : order.orderId != null ? order.orderId : order.ticket);
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(false);
+                void window.__bridgeBroker.cancelOrder(String(id));
+                return Promise.resolve(true);
+              },
+              showPositionBracketsDialog: function (position, brackets) {
+                var id = position && (position.id != null ? position.id : position.ticket != null ? position.ticket : position);
+                chartSltpDebug('customUI.showPositionBracketsDialog', { id: id, brackets: brackets });
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(true);
+                void window.__bridgeBroker.editPositionBrackets(String(id), brackets || {});
+                return Promise.resolve(true);
+              },
+              showPositionDialog: function (position, brackets) {
+                var id = position && (position.id != null ? position.id : position.ticket != null ? position.ticket : position);
+                chartSltpDebug('customUI.showPositionDialog', { id: id, brackets: brackets });
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(true);
+                void window.__bridgeBroker.editPositionBrackets(String(id), brackets || {});
+                return Promise.resolve(true);
+              },
+              showIndividualPositionBracketsDialog: function (position, brackets) {
+                var id = position && (position.id != null ? position.id : position.ticket != null ? position.ticket : position);
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(true);
+                void window.__bridgeBroker.editIndividualPositionBrackets(String(id), brackets || {});
+                return Promise.resolve(true);
+              },
+              showOrderBracketsDialog: function (order, brackets) {
+                var id = order && (order.id != null ? order.id : order.orderId != null ? order.orderId : order.ticket);
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(true);
+                var parsed = parseSyntheticBracketId(String(id));
+                if (parsed) {
+                  void window.__bridgeBroker.modifyOrder(String(id), brackets || {});
+                } else {
+                  void window.__bridgeBroker.modifyPendingOrder(String(id), extractModifyOrderPayload(brackets || {}, String(id)));
+                }
+                return Promise.resolve(true);
+              },
+              showOrderDialog: function (order) {
+                var id = order && (order.id != null ? order.id : order.orderId != null ? order.orderId : order.ticket);
+                if (id == null || !window.__bridgeBroker) return Promise.resolve(false);
+                void window.__bridgeBroker.modifyOrder(String(id), order || {});
+                return Promise.resolve(true);
+              },
+            },
+          },
+          disabled_features: [
+            'header_symbol_search',
+            'symbol_search_hot_key',
+            'header_compare',
+            'use_localstorage_for_settings',
+            'save_chart_properties_to_local_storage',
+            'widget_logo',
+            'buy_sell_buttons',
+            'broker_button',
+            'header_alert',
+            'create_alert',
+            'alert_set_alert_condition',
+            'show_last_value_in_legend',
+            'order_panel',
+            'show_order_panel_on_start',
+            'price_scale_add_order_plus_button',
+            'create_volume_indicator_by_default',
+            'create_volume_indicator_by_default_once',
+            'trading_notifications',
+            'legend_widget',
+            'display_market_status',
+            'show_symbol_logo_in_legend',
+            'show_symbol_logos',
+          ],
+          enabled_features: [
+            'countdown',
+            'pinch_scale',
+            'horz_touch_drag_scroll',
+            'vert_touch_drag_scroll',
+            'show_zoom_and_move_buttons_on_touch',
+            'header_interval_dialog_button',
+            'items_favoriting',
+            'trading_bracket_orders',
+            'create_order_from_chart',
+            'trading_order_context_menu_item',
+            'trading_account_manager',
+          ],
+          favorites: {
+            intervals: ['1', '5', '15', '60', '240', '1D'],
+          },
+          overrides: {
+            'mainSeriesProperties.style': 1,
+            'mainSeriesProperties.candleStyle.upColor': '#1E88E5',
+            'mainSeriesProperties.candleStyle.downColor': '#EF4444',
+            'mainSeriesProperties.candleStyle.borderUpColor': '#1E88E5',
+            'mainSeriesProperties.candleStyle.borderDownColor': '#EF4444',
+            'mainSeriesProperties.candleStyle.wickUpColor': '#1E88E5',
+            'mainSeriesProperties.candleStyle.wickDownColor': '#EF4444',
+            'paneProperties.vertGridProperties.color': '#F3F4F6',
+            'paneProperties.horzGridProperties.color': '#F3F4F6',
+            'scalesProperties.textColor': '#6B7280',
+            'paneProperties.background': initialBackground,
+            'paneProperties.backgroundType': 'solid',
+            'scalesProperties.backgroundColor': initialBackground,
+            'paneProperties.legendProperties.showLegend': false,
+            'paneProperties.legendProperties.showSeriesTitle': false,
+            'paneProperties.legendProperties.showSeriesOHLC': false,
+            'paneProperties.legendProperties.showBarChange': false,
+            'paneProperties.legendProperties.showLastDayChange': false,
+            'paneProperties.legendProperties.showVolume': false,
+            'paneProperties.legendProperties.showBackground': false,
+            'mainSeriesProperties.statusViewStyle.showExchange': false,
+            'mainSeriesProperties.statusViewStyle.showInterval': false,
+            'mainSeriesProperties.showPriceLine': true,
+            'mainSeriesProperties.bidAsk.visible': true,
+            'mainSeriesProperties.bidAsk.lineStyle': 1,
+            'mainSeriesProperties.bidAsk.lineWidth': 1,
+            'mainSeriesProperties.bidAsk.bidLineColor': '#ef4444',
+            'mainSeriesProperties.bidAsk.askLineColor': '#2563eb',
+            'scalesProperties.showBidAskLabels': true,
+            'scalesProperties.showSeriesLastValue': true,
+            'mainSeriesProperties.showCountdown': true,
+            'tradingProperties.bracketsPL.visibility': true,
+            'tradingProperties.bracketsPL.display': 0,
+            'tradingProperties.positionPL.visibility': true,
+            'tradingProperties.positionPL.display': 0,
+          },
+        }));
+
+        function forEachNodeDeep(root, visit) {
+          if (!root) return;
+          visit(root);
+          var nodes = root.querySelectorAll ? root.querySelectorAll('*') : [];
+          for (var i = 0; i < nodes.length; i += 1) {
+            var node = nodes[i];
+            visit(node);
+            if (node.shadowRoot) {
+              forEachNodeDeep(node.shadowRoot, visit);
+            }
+          }
+        }
+
+        function hideNodeTree(node) {
+          if (!node || !node.style) return;
+          node.style.setProperty('display', 'none', 'important');
+          node.style.setProperty('visibility', 'hidden', 'important');
+          node.style.setProperty('pointer-events', 'none', 'important');
+          node.style.setProperty('height', '0', 'important');
+          node.style.setProperty('max-height', '0', 'important');
+          node.style.setProperty('overflow', 'hidden', 'important');
+          node.style.setProperty('opacity', '0', 'important');
+        }
+
+        function hideChartLegend() {
+          var root = document.getElementById('tv_chart_container');
+          if (!root) return;
+          var legendSelectors = [
+            "[data-name='legend']",
+            "[data-name='legend-series-item']",
+            "[data-name='legend-source-title']",
+            "[class*='pane-legend']",
+            "[class*='titlesWrapper']",
+          ];
+          forEachNodeDeep(root, function (node) {
+            if (!node || node.nodeType !== 1) return;
+            for (var s = 0; s < legendSelectors.length; s += 1) {
+              try {
+                if (node.matches && node.matches(legendSelectors[s])) {
+                  hideNodeTree(node);
+                  break;
+                }
+              } catch (_) {}
+            }
+            if (node.getAttribute && node.getAttribute('data-name') === 'legend-source-item') {
+              var title = node.querySelector("[data-name='legend-source-title']");
+              if (title) hideNodeTree(title);
+              var text = String(node.textContent || '').trim();
+              if (
+                text &&
+                text.length < 80 &&
+                (/\bMT5\b/i.test(text) || /·/.test(text)) &&
+                !/\bBUY\b/i.test(text) &&
+                !/\bSELL\b/i.test(text)
+              ) {
+                hideNodeTree(node);
+              }
+            }
+          });
+        }
+
+        function hideNativeTradingButtons() {
+          var host = window.__bridgeBrokerHost;
+          if (host && typeof host.sellBuyButtonsVisibility === 'function') {
+            var watched = host.sellBuyButtonsVisibility();
+            if (watched && typeof watched.setValue === 'function') {
+              watched.setValue(false);
+            }
+          }
+          var root = document.getElementById('tv_chart_container');
+          if (!root) return;
+          var selectors = [
+            "[class*='buySell']",
+            "[class*='sellBuy']",
+            "[class*='brokerButton']",
+            "[class*='tradingButtons']",
+            "[class*='buy-sell']",
+            "[class*='buySellButtons']",
+            "[class*='legendBuySell']",
+            "[data-name='buy-sell-buttons']",
+            "[data-name='legend-buy-sell-buttons']",
+            "[data-name='legend-source-item-buttons']",
+            "[data-name='legend-broker-buttons']",
+            "[data-name='broker-button']",
+            "[data-name='trade-buttons']",
+            "[data-name='toast']",
+            "[data-name='notification']",
+            "[data-name='notice']",
+            "[class*='toast']",
+            "[class*='notification']",
+            "[class*='messageList']",
+            "[class*='snackbar']",
+          ];
+          forEachNodeDeep(root, function (node) {
+            if (!node || node.nodeType !== 1) return;
+            for (var s = 0; s < selectors.length; s += 1) {
+              try {
+                if (node.matches && node.matches(selectors[s])) {
+                  hideNodeTree(node);
+                  break;
+                }
+              } catch (_) {}
+            }
+          });
+
+          var containerTop = root.getBoundingClientRect().top;
+          forEachNodeDeep(root, function (node) {
+            if (!node || node.nodeType !== 1 || !node.textContent) return;
+            var text = String(node.textContent).trim().toUpperCase();
+            if (!/\bBUY\b/.test(text) && !/\bSELL\b/.test(text)) return;
+            var rect = node.getBoundingClientRect();
+            if (!rect || rect.height <= 0 || rect.width <= 0) return;
+            if (rect.top - containerTop > 150) return;
+            if (rect.height > 72 || rect.width > 260) return;
+            hideNodeTree(node);
+            var parent = node.parentElement;
+            for (var depth = 0; parent && depth < 6; depth += 1) {
+              if (parent === root) break;
+              hideNodeTree(parent);
+              parent = parent.parentElement;
+            }
+          });
+
+          // Fallback: remove TradingView bottom toasts by visible text content.
+          var toastHints = [
+            'ORDER MODIFIED',
+            'ORDER PLACED',
+            'TAKE PROFIT',
+            'STOP LOSS',
+            'BUY ',
+            'SELL ',
+          ];
+          forEachNodeDeep(document.body || root, function (node) {
+            if (!node || node.nodeType !== 1 || !node.textContent) return;
+            var text = String(node.textContent).trim().toUpperCase();
+            if (!text) return;
+            var looksLikeToast = false;
+            for (var i = 0; i < toastHints.length; i += 1) {
+              if (text.indexOf(toastHints[i]) >= 0) {
+                looksLikeToast = true;
+                break;
+              }
+            }
+            if (!looksLikeToast) return;
+            var rect = node.getBoundingClientRect && node.getBoundingClientRect();
+            if (!rect || rect.height <= 0 || rect.width <= 0) return;
+            if (rect.height > 220 || rect.width > window.innerWidth * 0.98) return;
+            hideNodeTree(node);
+            var p = node.parentElement;
+            for (var d = 0; p && d < 5; d += 1) {
+              hideNodeTree(p);
+              p = p.parentElement;
+            }
+          });
+        }
+
+        function removeDefaultVolumeIndicator() {
+          var chart = window.tvWidget && window.tvWidget.activeChart && window.tvWidget.activeChart();
+          if (!chart || typeof chart.getAllStudies !== 'function') return;
+          chart.getAllStudies().forEach(function (study) {
+            if (!study || !study.name) return;
+            if (!/volume/i.test(String(study.name))) return;
+            try {
+              chart.removeEntity(study.id);
+            } catch (_) {}
+          });
+        }
+
+        widget.onChartReady(function () {
+          window.__tvBridgeReady = true;
+          syncChartApiServerTime();
+          triggerCountdownTick();
+          hideChartLegend();
+          hideNativeTradingButtons();
+          removeDefaultVolumeIndicator();
+          try {
+            var readyChart = widget.activeChart && widget.activeChart();
+            if (readyChart && typeof readyChart.applyOverrides === 'function') {
+              readyChart.applyOverrides({
+                'paneProperties.background': initialBackground,
+                'paneProperties.backgroundType': 'solid',
+                'scalesProperties.backgroundColor': initialBackground,
+                'paneProperties.legendProperties.showLegend': false,
+                'paneProperties.legendProperties.showSeriesTitle': false,
+                'mainSeriesProperties.statusViewStyle.showExchange': false,
+                'mainSeriesProperties.statusViewStyle.showInterval': false,
+                'mainSeriesProperties.showPriceLine': true,
+                'mainSeriesProperties.bidAsk.visible': true,
+                'mainSeriesProperties.bidAsk.lineStyle': 1,
+                'mainSeriesProperties.bidAsk.lineWidth': 1,
+                'mainSeriesProperties.bidAsk.bidLineColor': '#ef4444',
+                'mainSeriesProperties.bidAsk.askLineColor': '#2563eb',
+                'scalesProperties.showBidAskLabels': true,
+                'scalesProperties.showSeriesLastValue': true,
+                'mainSeriesProperties.showCountdown': true,
+                'tradingProperties.bracketsPL.visibility': true,
+                'tradingProperties.bracketsPL.display': 0,
+                'tradingProperties.positionPL.visibility': true,
+                'tradingProperties.positionPL.display': 0,
+              });
+            }
+            if (typeof widget.applyOverrides === 'function') {
+              widget.applyOverrides({
+                'paneProperties.background': initialBackground,
+                'paneProperties.backgroundType': 'solid',
+                'scalesProperties.backgroundColor': initialBackground,
+              });
+            }
+          } catch (_) {}
+          if (!window.__hideTvTradingButtonsTimer) {
+            window.__hideTvTradingButtonsTimer = setInterval(function () {
+              hideChartLegend();
+              hideNativeTradingButtons();
+              removeDefaultVolumeIndicator();
+            }, 500);
+          }
+          if (!window.__hideTvTradingObserver && typeof MutationObserver === 'function') {
+            var observeRoot = document.getElementById('tv_chart_container');
+            if (observeRoot) {
+              window.__hideTvTradingObserver = new MutationObserver(function () {
+                hideChartLegend();
+                hideNativeTradingButtons();
+              });
+              window.__hideTvTradingObserver.observe(observeRoot, {
+                childList: true,
+                subtree: true,
+              });
+            }
+          }
+          if (window.__nativeMessageQueue && window.__nativeMessageQueue.length) {
+            window.__nativeMessageQueue.splice(0).forEach(function (raw) {
+              handleNativeMessage(raw);
+            });
+          }
+
+          var chart = widget.activeChart();
+          try {
+            if (chart && typeof chart.executeActionById === 'function') {
+              chart.executeActionById('Trading.SellBuyButtonsToggleVisibility');
+            }
+          } catch (_) {}
+          // Keep the left drawing toolbar open by default.
+          try {
+            if (
+              chart &&
+              typeof chart.getCheckableActionState === 'function' &&
+              typeof chart.executeActionById === 'function' &&
+              !chart.getCheckableActionState('drawingToolbarAction')
+            ) {
+              chart.executeActionById('drawingToolbarAction');
+            }
+          } catch (_) {}
+          activeResolution = chart.resolution();
+
+          chart.onIntervalChanged().subscribe(null, function (interval) {
+            activeResolution = interval;
+            var lastBar = lastBars[initialSymbol];
+            if (lastBar) {
+              updateBrokerOffset(lastBar.time, interval);
+            }
+            triggerCountdownTick();
+            postToNative({
+              type: 'INTERVAL_CHANGED',
+              payload: { resolution: interval },
+            });
+          });
+
+          chartSltpDebug('chart.ready.hooks', {
+            hasOnOrderMove: !!(chart && typeof chart.onOrderMove === 'function'),
+            positionCount: livePositions.length,
+            positionIds: livePositions.map(function (p) {
+              return String(p.id);
+            }),
+          });
+          if (typeof chart.onOrderMove === 'function') {
+            chart.onOrderMove().subscribe(null, function (order) {
+              var id = order && order.id != null ? String(order.id) : '';
+              var nextPrice = isPreviewOrderId(id)
+                ? chartMainOrderDragPrice(order) ?? chartBracketDragLinePrice(order)
+                : chartBracketDragLinePrice(order);
+              chartSltpDebug('onOrderMove.event', {
+                orderId: order && order.id,
+                parentId: order && order.parentId,
+                nextPrice: nextPrice,
+                isPreview: isPreviewOrderId(id),
+              });
+              if (isPreviewOrderId(id)) {
+                chartPreviewDebug('onOrderMove.preview', 'A', {
+                  orderId: id,
+                  nextPrice: nextPrice,
+                });
+              }
+              if (nextPrice == null || !Number.isFinite(nextPrice)) return;
+              chartLineOnOrderMove(order, nextPrice);
+            });
+          } else {
+            chartSltpDebug('onOrderMove.unavailable', {});
+            chartPreviewDebug('onOrderMove.unavailable', 'A', {});
+          }
+
+          postToNative({
+            type: 'READY',
+            payload: {
+              symbol: initialSymbol,
+              resolution: activeResolution,
+              bridgeVersion: CHART_BRIDGE_VERSION,
+            },
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
