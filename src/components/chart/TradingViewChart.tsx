@@ -41,6 +41,7 @@ export interface TradingViewChartProps {
   } | null;
   onPreviewChange?: (change: { price: number; stopLoss?: number; takeProfit?: number }) => void;
   containerStyle?: object;
+  initialPrice?: number;
 }
 
 export const TradingViewChart: React.FC<TradingViewChartProps> = ({
@@ -51,6 +52,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   previewOrder,
   onPreviewChange,
   containerStyle,
+  initialPrice,
 }) => {
   const {
     positions,
@@ -71,6 +73,18 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   const [failed, setFailed] = useState(false);
   const [socketStatus, setSocketStatus] = useState<ChartSocketStatus>('disconnected');
 
+  const onLiveQuoteRef = useRef(onLiveQuote);
+  useEffect(() => {
+    onLiveQuoteRef.current = onLiveQuote;
+  });
+
+  const lastLivePriceRef = useRef<number>(initialPrice || 0);
+  useEffect(() => {
+    if (initialPrice && initialPrice > 0 && !lastLivePriceRef.current) {
+      lastLivePriceRef.current = initialPrice;
+    }
+  }, [initialPrice]);
+
   const tradingSymbol = symbol ? symbol.trim() : 'BTCUSD';
   const chartSymbol = normalizeMarketSymbol(tradingSymbol);
 
@@ -89,9 +103,10 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         interval: initialResolutionRef.current,
         theme: 'light',
         background: '#FFFFFF',
+        price: lastLivePriceRef.current || initialPrice,
         serverTimeOffset: chartSocket.getBrokerOffsetMs(),
       }),
-    [chartSymbol, tradingSymbol],
+    [chartSymbol, tradingSymbol, initialPrice],
   );
 
   // Synchronize open positions and pending orders for broker lines
@@ -201,7 +216,10 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
   const pushQuote = useCallback(
     (quote: ChartQuote) => {
-      onLiveQuote?.({ bid: quote.bid, ask: quote.ask });
+      if (quote.bid > 0) {
+        lastLivePriceRef.current = quote.bid;
+      }
+      onLiveQuoteRef.current?.({ bid: quote.bid, ask: quote.ask });
       injectBridgeCall(
         `window.__lastChartQuote=${JSON.stringify({
           bid: quote.bid,
@@ -216,55 +234,20 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         })});`,
       );
     },
-    [chartSymbol, injectBridgeCall, onLiveQuote],
+    [chartSymbol, injectBridgeCall],
   );
-
-  // Generate smooth fallback candles anchored backwards from the current price
-  const generateFallbackCandles = useCallback((res: string, anchorPrice?: number): ChartCandle[] => {
-    const bars: ChartCandle[] = [];
-    const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
-    const upper = tradingSymbol.toUpperCase();
-    const endPrice = (anchorPrice && anchorPrice > 0) ? anchorPrice : (matched?.bid ?? (
-      upper.includes('BTC') ? 83915.0 :
-      upper.includes('ETH') ? 2685.0 :
-      upper.includes('SOL') ? 120.4 :
-      upper.includes('XAU') ? 2654.8 :
-      upper.includes('XAG') ? 31.4 :
-      upper.includes('JPY') ? 154.2 :
-      1.0845
-    ));
-
-    const now = Date.now();
-    const intervalMs = socketTimeframeToMs(resolutionToSocketTimeframe(res)) || 300_000;
-    const currentBucket = Math.floor(now / intervalMs) * intervalMs;
-    const volatility = Math.max(endPrice * 0.0004, 0.0001);
-
-    // Build bars from newest (index 0 = now) to oldest, so the LAST bar ends precisely at endPrice
-    let price = endPrice;
-    for (let i = 0; i <= 80; i++) {
-      const time = currentBucket - i * intervalMs;
-      const prevPrice = price + (Math.random() - 0.5) * volatility;
-      const open = prevPrice;
-      const close = price;
-      const high = Math.max(open, close) + Math.random() * (volatility * 0.4);
-      const low = Math.min(open, close) - Math.random() * (volatility * 0.4);
-      bars.unshift({ time, open, high, low, close });
-      price = prevPrice;
-    }
-    return bars;
-  }, [tradingSymbol]);
 
   const requestHistory = useCallback(
     (targetResolution: string) => {
-      let historyReceived = false;
-
-      // 1. Connect to live broker socket for real MT5 candles and live ticks
+      // Connect to live broker socket for real MT5 candles and live ticks
       chartSocket.connect(tradingSymbol, targetResolution, {
         onHistory: (candles) => {
           if (candles && candles.length > 0) {
-            historyReceived = true;
-            if (pageActiveRef.current) pushHistory(candles, targetResolution);
-            else pendingHistoryRef.current = { candles, resolution: targetResolution };
+            if (pageActiveRef.current) {
+              pushHistory(candles, targetResolution);
+            } else {
+              pendingHistoryRef.current = { candles, resolution: targetResolution };
+            }
           }
         },
         onCandle: (candle) => {
@@ -278,20 +261,8 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
           setSocketStatus((curr) => (curr === 'connected' ? 'disconnected' : curr));
         },
       });
-
-      // 2. Fallback timeout: only if socket history didn't arrive, seed smoothly
-      setTimeout(() => {
-        if (!historyReceived && !pendingHistoryRef.current) {
-          const seedCandles = generateFallbackCandles(targetResolution);
-          if (pageActiveRef.current) {
-            pushHistory(seedCandles, targetResolution);
-          } else {
-            pendingHistoryRef.current = { candles: seedCandles, resolution: targetResolution };
-          }
-        }
-      }, 700);
     },
-    [generateFallbackCandles, pushHistory, pushQuote, pushUpdate, tradingSymbol],
+    [pushHistory, pushQuote, pushUpdate, tradingSymbol],
   );
 
   useEffect(() => {
@@ -343,16 +314,9 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
           } catch(e){}
         })();`,
       );
-      const seedCandles = generateFallbackCandles(resolutionRef.current);
-      pushHistory(seedCandles, resolutionRef.current);
-      const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
-      const upper = tradingSymbol.toUpperCase();
-      const initBid = matched?.bid ?? (upper.includes('BTC') ? 84100 : 2600);
-      const initSpread = matched?.spread ?? (upper.includes('BTC') ? 10 : 0.05);
-      pushQuote({ symbol: tradingSymbol, bid: initBid, ask: initBid + initSpread, time: Date.now() });
       requestHistory(resolutionRef.current);
     }
-  }, [chartSymbol, generateFallbackCandles, injectBridgeCall, pushHistory, pushQuote, requestHistory, tradingSymbol]);
+  }, [chartSymbol, injectBridgeCall, requestHistory, tradingSymbol]);
 
   // Reply back to WebView bridge
   const reply = useCallback(
@@ -411,11 +375,13 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
       if (!pageActiveRef.current) {
         pageActiveRef.current = true;
-        const initialCandles = pendingHistoryRef.current?.candles?.length
-          ? pendingHistoryRef.current.candles
-          : generateFallbackCandles(resolutionRef.current);
-        pushHistory(initialCandles, resolutionRef.current);
-        pendingHistoryRef.current = null;
+        if (pendingHistoryRef.current?.candles?.length) {
+          pushHistory(
+            pendingHistoryRef.current.candles,
+            pendingHistoryRef.current.resolution,
+          );
+          pendingHistoryRef.current = null;
+        }
       }
 
       if (message.type === 'READY') {
@@ -461,18 +427,19 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
             pendingHistoryRef.current.resolution,
           );
           pendingHistoryRef.current = null;
-        } else {
-          // If no history yet, trigger fallback
-          const fallback = generateFallbackCandles(resolutionRef.current);
-          pushHistory(fallback, resolutionRef.current);
         }
 
-        // Push initial quote immediately so TradingView Ask/Bid lines appear at once
-        const matched = DEFAULT_CATALOG_SYMBOLS.find((s) => marketSymbolsMatch(s.symbol, tradingSymbol));
-        const upper = tradingSymbol.toUpperCase();
-        const initBid = matched?.bid ?? (upper.includes('BTC') ? 84100 : 2600);
-        const initSpread = matched?.spread ?? (upper.includes('BTC') ? 10 : 0.05);
-        pushQuote({ symbol: tradingSymbol, bid: initBid, ask: initBid + initSpread, time: Date.now() });
+        // Push real live quote if already received so TradingView Ask/Bid lines appear at once
+        if (lastLivePriceRef.current > 0) {
+          const upper = tradingSymbol.toUpperCase();
+          const spread = upper.includes('BTC') ? 2.2 : upper.includes('XAU') ? 0.25 : 0.0001;
+          pushQuote({
+            symbol: tradingSymbol,
+            bid: lastLivePriceRef.current,
+            ask: lastLivePriceRef.current + spread,
+            time: Date.now(),
+          });
+        }
 
         pushTradingSync();
         return;
@@ -574,13 +541,13 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     [
       cancelPendingOrder,
       closePosition,
-      generateFallbackCandles,
       injectBridgeCall,
       modifyPendingOrder,
       modifyPosition,
       onPreviewChange,
       onResolutionChange,
       pushHistory,
+      pushQuote,
       pushTradingSync,
       refreshTrading,
       reply,
@@ -596,10 +563,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         source={{ uri: chartUri }}
         {...TRADINGVIEW_WEBVIEW_PROPS}
         onMessage={onMessage}
-        onLoadEnd={() => {
-          const bars = generateFallbackCandles(resolutionRef.current);
-          pushHistory(bars, resolutionRef.current);
-        }}
         onError={() => {
           setLoading(false);
           setFailed(true);

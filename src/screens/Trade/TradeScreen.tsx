@@ -73,7 +73,7 @@ export const TradeScreen: React.FC = () => {
 
   const [showSwitchAccount, setShowSwitchAccount] = useState<boolean>(false);
   const [showOpenAccount, setShowOpenAccount] = useState<boolean>(false);
-  const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | null>(null);
+  const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | null>('BTCUSD');
 
   const { positions, refresh: refreshTrading } = useTradingData();
   const [sparklines, setSparklines] = useState<Record<string, number[]>>({});

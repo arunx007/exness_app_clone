@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -303,6 +303,12 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
     }
   }, [marketQuotes, currentSymbol]);
 
+  const handleLiveQuote = useCallback((q: { bid: number; ask: number }) => {
+    if (q.bid > 0) {
+      setBidPrice(q.bid);
+    }
+  }, []);
+
   return (
     <View style={[styles.container, { paddingTop: orderExecutionModal.visible ? Math.max(insets.top, 8) : insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -544,9 +550,8 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
             };
             if (revMap[res]) setSelectedTimeframe(revMap[res]);
           }}
-          onLiveQuote={(q) => {
-            if (q.bid > 0) setBidPrice(q.bid);
-          }}
+          initialPrice={bidPrice}
+          onLiveQuote={handleLiveQuote}
           previewOrder={
             orderExecutionModal.visible
               ? {
