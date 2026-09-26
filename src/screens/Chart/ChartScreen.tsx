@@ -88,6 +88,28 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   // Trading lots on the chart bottom bar
   const [tradingLots, setTradingLots] = useState(4.76);
 
+  // Market sentiment percentage (Sell vs Buy) - randomized realistically
+  const [sellSentiment, setSellSentiment] = useState(() => Math.floor(Math.random() * 21) + 40); // 40% to 60%
+  const buySentiment = 100 - sellSentiment;
+
+  // Periodically fluctuate sentiment slightly and randomize on symbol change
+  useEffect(() => {
+    const base = Math.floor(Math.random() * 21) + 40;
+    setSellSentiment(base);
+
+    const timer = setInterval(() => {
+      setSellSentiment((prev) => {
+        const delta = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 1);
+        const next = prev + delta;
+        if (next < 28) return 30;
+        if (next > 72) return 70;
+        return next;
+      });
+    }, 4500);
+
+    return () => clearInterval(timer);
+  }, [currentSymbol]);
+
   // Order execution sheet state (when One-click is disabled)
   const [orderExecutionModal, setOrderExecutionModal] = useState<{
     visible: boolean;
@@ -690,16 +712,16 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                 </TouchableOpacity>
               </View>
 
-              {/* SENTIMENT BAR (Image 1: 47% Red | 53% Blue) */}
+              {/* SENTIMENT BAR (Dynamic random Sell % | Buy %) */}
               <View style={styles.sentimentContainer}>
                 <View style={styles.sentimentBarsRow}>
-                  <View style={[styles.sentimentBarFillRed, { flex: 47 }]} />
+                  <View style={[styles.sentimentBarFillRed, { flex: Math.max(1, sellSentiment) }]} />
                   <View style={{ width: 8 }} />
-                  <View style={[styles.sentimentBarFillBlue, { flex: 53 }]} />
+                  <View style={[styles.sentimentBarFillBlue, { flex: Math.max(1, buySentiment) }]} />
                 </View>
                 <View style={styles.sentimentLabelsRow}>
-                  <Text style={styles.sentimentLabelRed}>47%</Text>
-                  <Text style={styles.sentimentLabelBlue}>53%</Text>
+                  <Text style={styles.sentimentLabelRed}>{sellSentiment}%</Text>
+                  <Text style={styles.sentimentLabelBlue}>{buySentiment}%</Text>
                 </View>
               </View>
             </>
