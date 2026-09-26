@@ -20,7 +20,9 @@ import {
 } from '../api';
 import { validateLoginCredentials, normalizeEmail } from '../utils/authValidation';
 
-const USER_STORAGE_KEY = 'exness-clone.user-session.v1';
+const USER_STORAGE_KEY = 'brokerbros.user-session.v1';
+const ONBOARDING_STORAGE_KEY = 'brokerbros.onboarding.v1';
+const AUTO_LOGIN_STORAGE_KEY = 'brokerbros.auto-login.v1';
 
 export interface AuthContextType {
   user: BrokerUser | null;
@@ -28,6 +30,9 @@ export interface AuthContextType {
   mt5Token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  hasCompletedOnboarding: boolean;
+  isAutoLoginEnabled: boolean;
+  completeOnboarding: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<BrokerLoginResponse>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<BrokerUser | null>;
@@ -41,6 +46,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [brokerToken, setBrokerToken] = useState<string | null>(brokerSession.getToken());
   const [mt5Token, setMt5Token] = useState<string | null>(mt5Session.getToken());
   const [isLoading, setIsLoading] = useState(true);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [isAutoLoginEnabled, setIsAutoLoginEnabled] = useState(false);
 
   // Sync token changes from sessions
   useEffect(() => {
@@ -56,14 +63,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const completeOnboarding = useCallback(async () => {
+    setHasCompletedOnboarding(true);
+    if (Platform.OS !== 'web') {
+      try {
+        await SecureStore.setItemAsync(ONBOARDING_STORAGE_KEY, '1');
+      } catch {}
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
-    brokerAuthService.logout();
+    try {
+      await brokerAuthService.logout();
+    } catch {}
     mt5Session.clear();
     setUser(null);
     setBrokerToken(null);
     setMt5Token(null);
+    setIsAutoLoginEnabled(false);
     if (Platform.OS !== 'web') {
       try {
+        await SecureStore.setItemAsync(AUTO_LOGIN_STORAGE_KEY, 'false');
         await SecureStore.deleteItemAsync(USER_STORAGE_KEY);
       } catch {}
     }
@@ -83,30 +103,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
     async function restore() {
       try {
-        const tokens = await brokerSession.restore();
+        let isOnboardingDone = false;
+        let isAutoLogin = false;
+
         if (Platform.OS !== 'web') {
-          const storedUser = await SecureStore.getItemAsync(USER_STORAGE_KEY);
-          if (storedUser && mounted) {
-            setUser(JSON.parse(storedUser));
-          }
-        }
-        if (tokens.accessToken) {
-          if (mounted) setBrokerToken(tokens.accessToken);
-          // Verify token is still accepted by server
           try {
-            const profile = await brokerAuthService.me();
-            if (mounted) {
-              setUser(profile);
-              if (Platform.OS !== 'web') {
-                await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(profile));
+            const [onboardingVal, autoLoginVal] = await Promise.all([
+              SecureStore.getItemAsync(ONBOARDING_STORAGE_KEY),
+              SecureStore.getItemAsync(AUTO_LOGIN_STORAGE_KEY),
+            ]);
+            isOnboardingDone = onboardingVal === '1';
+            isAutoLogin = autoLoginVal === 'true';
+          } catch {}
+        }
+
+        if (mounted) {
+          setHasCompletedOnboarding(isOnboardingDone);
+          setIsAutoLoginEnabled(isAutoLogin);
+        }
+
+        // Only auto-login if auto-login is true
+        if (isAutoLogin) {
+          const tokens = await brokerSession.restore();
+          if (Platform.OS !== 'web') {
+            try {
+              const storedUser = await SecureStore.getItemAsync(USER_STORAGE_KEY);
+              if (storedUser && mounted) {
+                setUser(JSON.parse(storedUser));
+              }
+            } catch {}
+          }
+          if (tokens.accessToken) {
+            if (mounted) setBrokerToken(tokens.accessToken);
+            // Verify token is still accepted by server
+            try {
+              const profile = await brokerAuthService.me();
+              if (mounted) {
+                setUser(profile);
+                if (Platform.OS !== 'web') {
+                  await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(profile));
+                }
+              }
+            } catch (err) {
+              // Token rejected by server — kick out immediately!
+              if (mounted) {
+                console.warn('[AuthContext] Stored token rejected by server, clearing session:', err);
+                await signOut();
               }
             }
-          } catch (err) {
-            // Token is expired or rejected by server — kick out immediately!
+          } else {
+            // No valid token stored
             if (mounted) {
-              console.warn('[AuthContext] Stored token rejected by server, clearing session:', err);
-              await signOut();
+              setBrokerToken(null);
+              setUser(null);
             }
+          }
+        } else {
+          // Auto login is false: clear broker & mt5 sessions so user is logged out
+          brokerSession.clear();
+          mt5Session.clear();
+          if (mounted) {
+            setBrokerToken(null);
+            setMt5Token(null);
+            setUser(null);
           }
         }
       } catch (err) {
@@ -152,8 +211,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setUser(loggedUser);
       setBrokerToken(token);
+      setIsAutoLoginEnabled(true);
+      setHasCompletedOnboarding(true);
+
       if (Platform.OS !== 'web') {
-        await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(loggedUser));
+        try {
+          await Promise.all([
+            SecureStore.setItemAsync(AUTO_LOGIN_STORAGE_KEY, 'true'),
+            SecureStore.setItemAsync(ONBOARDING_STORAGE_KEY, '1'),
+            SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(loggedUser)),
+          ]);
+        } catch {}
       }
 
       return response;
@@ -193,12 +261,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       mt5Token,
       isAuthenticated: Boolean(brokerToken),
       isLoading,
+      hasCompletedOnboarding,
+      isAutoLoginEnabled,
+      completeOnboarding,
       signIn,
       signOut,
       refreshUser,
       setMt5Tokens,
     }),
-    [user, brokerToken, mt5Token, isLoading, signIn, signOut, refreshUser, setMt5Tokens],
+    [
+      user,
+      brokerToken,
+      mt5Token,
+      isLoading,
+      hasCompletedOnboarding,
+      isAutoLoginEnabled,
+      completeOnboarding,
+      signIn,
+      signOut,
+      refreshUser,
+      setMt5Tokens,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

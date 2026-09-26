@@ -175,7 +175,12 @@ export const brokerAuthService = {
     return brokerRequest<BrokerUser>(BROKER_AUTH_ENDPOINTS.ME, { method: 'GET' });
   },
 
-  logout(): void {
+  async logout(): Promise<void> {
+    try {
+      await brokerRequest(BROKER_AUTH_ENDPOINTS.LOGOUT, { method: 'POST' });
+    } catch {
+      // Gracefully ignore network or 404/401 errors on logout
+    }
     brokerSession.clear();
   },
 };

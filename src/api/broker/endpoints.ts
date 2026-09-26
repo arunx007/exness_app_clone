@@ -7,6 +7,7 @@ export const BROKER_AUTH_ENDPOINTS = {
   FORGOT_PASSWORD: '/auth/forgot-password',
   VERIFY_RESET_OTP: '/auth/verify-reset-otp',
   RESET_PASSWORD: '/auth/reset-password',
+  LOGOUT: '/auth/logout',
 } as const;
 
 export type BrokerRegisterRequest = {
