@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { AccountsScreen } from '../screens/Accounts/AccountsScreen';
 import { TradeScreen } from '../screens/Trade/TradeScreen';
-import { MarketsScreen } from '../screens/Markets/MarketsScreen';
+import { InsightsScreen } from '../screens/Insights/InsightsScreen';
 import { PerformanceScreen } from '../screens/Performance/PerformanceScreen';
 import { ProfileScreen } from '../screens/Profile/ProfileScreen';
 import {
@@ -26,7 +26,7 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 export const RootNavigator: React.FC = () => {
   return (
     <Tab.Navigator
-      initialRouteName="Accounts"
+      initialRouteName="Insights"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -64,7 +64,7 @@ export const RootNavigator: React.FC = () => {
       />
       <Tab.Screen
         name="Insights"
-        component={MarketsScreen}
+        component={InsightsScreen}
         options={{
           tabBarLabel: 'Insights',
           tabBarIcon: ({ color }) => <InsightsTabIcon color={color} size={22} />,
