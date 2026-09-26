@@ -34,38 +34,54 @@ import {
 import { useAccount } from '../../context/AccountContext';
 import { useTradingData } from '../../context/TradingDataContext';
 import { ChartScreen } from '../Chart/ChartScreen';
+import { useMarketQuotes } from '../../hooks/useMarketQuotes';
+import { marketSymbolsMatch } from '../../utils/symbol';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface QuickInstrument {
+interface QuickSymbolDef {
   symbol: string;
-  price: string;
-  change: string;
-  isPositive: boolean;
-  type: 'forex' | 'crypto' | 'commodity';
+  querySymbol: string;
+  fallbackPrice: number;
+  fallbackChange: number;
+  digits: number;
 }
 
-const QUICK_INSTRUMENTS: QuickInstrument[] = [
+const FIVE_QUICK_SYMBOLS: QuickSymbolDef[] = [
   {
     symbol: 'XAU/USD',
-    price: '4285.467',
-    change: '+0.48%',
-    isPositive: true,
-    type: 'commodity',
+    querySymbol: 'XAUUSD',
+    fallbackPrice: 2654.80,
+    fallbackChange: 0.68,
+    digits: 2,
   },
   {
     symbol: 'BTC',
-    price: '83709.55',
-    change: '-0.8%',
-    isPositive: false,
-    type: 'crypto',
+    querySymbol: 'BTCUSD',
+    fallbackPrice: 84050.25,
+    fallbackChange: 1.42,
+    digits: 2,
   },
   {
     symbol: 'USOIL',
-    price: '91.032',
-    change: '-1.96%',
-    isPositive: false,
-    type: 'commodity',
+    querySymbol: 'USOIL',
+    fallbackPrice: 71.45,
+    fallbackChange: -1.25,
+    digits: 2,
+  },
+  {
+    symbol: 'EUR/USD',
+    querySymbol: 'EURUSD',
+    fallbackPrice: 1.08425,
+    fallbackChange: -0.15,
+    digits: 5,
+  },
+  {
+    symbol: 'GBP/USD',
+    querySymbol: 'GBPUSD',
+    fallbackPrice: 1.29340,
+    fallbackChange: 0.24,
+    digits: 5,
   },
 ];
 
@@ -114,6 +130,74 @@ export const AccountsScreen: React.FC = () => {
   const [showVerifyContactModal, setShowVerifyContactModal] = useState(false);
   const [showChartModal, setShowChartModal] = useState(false);
   const [selectedChartSymbol, setSelectedChartSymbol] = useState<string>('BTC');
+
+  // 5 dynamic quick trade symbols live socket subscription
+  const quickSymbolKeys = useMemo(() => FIVE_QUICK_SYMBOLS.map((s) => s.querySymbol), []);
+  const liveQuickQuotes = useMarketQuotes(quickSymbolKeys);
+
+  const renderQuickTradeCards = (headline: string) => (
+    <View style={{ marginTop: 4, marginBottom: 16 }}>
+      <Text style={styles.noOrdersText}>{headline}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalInstrumentsList}
+      >
+        {FIVE_QUICK_SYMBOLS.map((item, idx) => {
+          const live =
+            liveQuickQuotes[item.querySymbol] ??
+            Object.values(liveQuickQuotes).find((q) => marketSymbolsMatch(q.symbol, item.querySymbol));
+          const price = live && live.bid > 0 ? live.bid : item.fallbackPrice;
+          const changePercent =
+            live?.changePercent !== undefined ? live.changePercent : item.fallbackChange;
+          const isPositive = changePercent >= 0;
+          const formattedPrice = price.toFixed(item.digits);
+          const formattedChange = `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%`;
+
+          return (
+            <TouchableOpacity
+              key={idx}
+              activeOpacity={0.8}
+              style={styles.instrumentCard}
+              onPress={() => {
+                setSelectedChartSymbol(item.querySymbol);
+                setShowChartModal(true);
+              }}
+            >
+              <Text style={styles.instrumentSymbol}>{item.symbol}</Text>
+              <View style={styles.instrumentIconRow}>
+                <SymbolIcon symbol={item.querySymbol} size={28} />
+              </View>
+              <Text style={styles.instrumentPrice}>{formattedPrice}</Text>
+              <View
+                style={[
+                  styles.changePill,
+                  {
+                    backgroundColor: isPositive ? '#EFF6FF' : '#FEF2F2',
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={isPositive ? 'arrow-up' : 'arrow-down'}
+                  size={12}
+                  color={isPositive ? '#2563EB' : '#DC2626'}
+                  style={{ marginRight: 2 }}
+                />
+                <Text
+                  style={[
+                    styles.changePillText,
+                    { color: isPositive ? '#2563EB' : '#DC2626' },
+                  ]}
+                >
+                  {formattedChange}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
 
   // Ensure Modals are closed whenever switching tabs or coming back
   useEffect(() => {
@@ -468,90 +552,40 @@ export const AccountsScreen: React.FC = () => {
                 ))}
               </View>
             ) : (
-              <View>
-                <Text style={styles.noOrdersText}>
-                  No open orders. Find your next trade:
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalInstrumentsList}
-                >
-                  {QUICK_INSTRUMENTS.map((item, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      activeOpacity={0.8}
-                      style={styles.instrumentCard}
-                      onPress={() => {
-                        setSelectedChartSymbol(item.symbol);
-                        setShowChartModal(true);
-                      }}
-                    >
-                      <Text style={styles.instrumentSymbol}>{item.symbol}</Text>
-                      <View style={styles.instrumentIconRow}>
-                        <SymbolIcon symbol={item.symbol} size={28} />
-                      </View>
-                      <Text style={styles.instrumentPrice}>{item.price}</Text>
-                      <View
-                        style={[
-                          styles.changePill,
-                          {
-                            backgroundColor: item.isPositive ? '#EFF6FF' : '#FEF2F2',
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name={item.isPositive ? 'arrow-up' : 'arrow-down'}
-                          size={12}
-                          color={item.isPositive ? '#2563EB' : '#DC2626'}
-                          style={{ marginRight: 2 }}
-                        />
-                        <Text
-                          style={[
-                            styles.changePillText,
-                            { color: item.isPositive ? '#2563EB' : '#DC2626' },
-                          ]}
-                        >
-                          {item.change}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+              renderQuickTradeCards('No open orders. Find your next trade:')
             )
           ) : activeTab === 'Pending' ? (
             livePendingOrders.length > 0 ? (
-              <View style={{ paddingHorizontal: 16 }}>
-                {livePendingOrders.map((ord) => (
-                  <View key={ord.id} style={styles.pendingCard}>
-                    <View style={styles.pendingLeftRow}>
-                      <View style={styles.symbolIconWrapper}>
-                        <SymbolIcon symbol={ord.symbol} size={34} />
+              <View>
+                <View style={{ paddingHorizontal: 16 }}>
+                  {livePendingOrders.map((ord) => (
+                    <View key={ord.id} style={styles.pendingCard}>
+                      <View style={styles.pendingLeftRow}>
+                        <View style={styles.symbolIconWrapper}>
+                          <SymbolIcon symbol={ord.symbol} size={34} />
+                        </View>
+                        <View style={{ marginLeft: 12 }}>
+                          <Text style={styles.closedSymbol}>{ord.symbol}</Text>
+                          <Text style={styles.closedOrderTypeLot}>
+                            <Text style={styles.buyText}>{ord.type.replace('_', ' ')} {ord.volume} lot</Text> at {ord.price}
+                          </Text>
+                        </View>
                       </View>
-                      <View style={{ marginLeft: 12 }}>
-                        <Text style={styles.closedSymbol}>{ord.symbol}</Text>
-                        <Text style={styles.closedOrderTypeLot}>
-                          <Text style={styles.buyText}>{ord.type.replace('_', ' ')} {ord.volume} lot</Text> at {ord.price}
-                        </Text>
-                      </View>
-                    </View>
 
-                    <TouchableOpacity
-                      style={styles.cancelPendingBtn}
-                      activeOpacity={0.7}
-                      onPress={() => cancelPendingOrder(ord.ticket)}
-                    >
-                      <Text style={styles.cancelPendingText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                      <TouchableOpacity
+                        style={styles.cancelPendingBtn}
+                        activeOpacity={0.7}
+                        onPress={() => cancelPendingOrder(ord.ticket)}
+                      >
+                        <Text style={styles.cancelPendingText}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+                {renderQuickTradeCards('Find your next trade:')}
               </View>
             ) : (
-              <View style={styles.emptyPendingContainer}>
-                <Ionicons name="hourglass-outline" size={40} color="#9CA3AF" style={{ marginBottom: 12 }} />
-                <Text style={styles.noOrdersText}>No pending orders currently active.</Text>
-              </View>
+              renderQuickTradeCards('No pending orders. Find your next trade:')
             )
           ) : (
             currentClosedOrders.length > 0 ? (
@@ -598,12 +632,11 @@ export const AccountsScreen: React.FC = () => {
                     Showing closed orders for the last 30 days
                   </Text>
                 </View>
+
+                {renderQuickTradeCards('Find your next trade:')}
               </View>
             ) : (
-              <View style={styles.emptyPendingContainer}>
-                <Ionicons name="receipt-outline" size={40} color="#9CA3AF" style={{ marginBottom: 12 }} />
-                <Text style={styles.noOrdersText}>No closed orders in the last 30 days.</Text>
-              </View>
+              renderQuickTradeCards('No closed orders in the last 30 days. Find your next trade:')
             )
           )}
         </View>
