@@ -359,105 +359,7 @@
           }
         }
 
-        var nativeBidAskLines = {
-          bidLine: null,
-          askLine: null,
-          lastBid: 0,
-          lastAsk: 0,
-          initializing: false,
-          init: function () {
-            if (this.initializing) return;
-            var self = this;
-            var chart =
-              window.tvWidget &&
-              typeof window.tvWidget.activeChart === 'function' &&
-              window.tvWidget.activeChart();
-            if (!chart || typeof chart.createOrderLine !== 'function') return;
-            this.initializing = true;
 
-            var createBid = Promise.resolve(chart.createOrderLine())
-              .then(function (line) {
-                self.bidLine = line;
-                try {
-                  if (typeof line.setLineColor === 'function') line.setLineColor('#1E88E5');
-                  if (typeof line.setLineStyle === 'function') line.setLineStyle(2); // dashed
-                  if (typeof line.setLineWidth === 'function') line.setLineWidth(1);
-                  if (typeof line.setLineLength === 'function') line.setLineLength(100);
-                  if (typeof line.setExtendLeft === 'function') line.setExtendLeft(true);
-                  if (typeof line.setEditable === 'function') line.setEditable(false);
-                  if (typeof line.setCancellable === 'function') line.setCancellable(false);
-                  if (typeof line.setText === 'function') line.setText('Bid');
-                  if (typeof line.setQuantity === 'function') line.setQuantity('');
-                  if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#FFFFFF');
-                  if (typeof line.setBodyBackgroundColor === 'function') {
-                    line.setBodyBackgroundColor('#1E88E5');
-                  }
-                  if (typeof line.setBodyBorderColor === 'function') {
-                    line.setBodyBorderColor('#1E88E5');
-                  }
-                  if (self.lastBid > 0 && typeof line.setPrice === 'function') {
-                    line.setPrice(self.lastBid);
-                  }
-                } catch (_) {}
-                return line;
-              })
-              .catch(function () {
-                return null;
-              });
-
-            var createAsk = Promise.resolve(chart.createOrderLine())
-              .then(function (line) {
-                self.askLine = line;
-                try {
-                  if (typeof line.setLineColor === 'function') line.setLineColor('#EF4444');
-                  if (typeof line.setLineStyle === 'function') line.setLineStyle(2); // dashed
-                  if (typeof line.setLineWidth === 'function') line.setLineWidth(1);
-                  if (typeof line.setLineLength === 'function') line.setLineLength(100);
-                  if (typeof line.setExtendLeft === 'function') line.setExtendLeft(true);
-                  if (typeof line.setEditable === 'function') line.setEditable(false);
-                  if (typeof line.setCancellable === 'function') line.setCancellable(false);
-                  if (typeof line.setText === 'function') line.setText('Ask');
-                  if (typeof line.setQuantity === 'function') line.setQuantity('');
-                  if (typeof line.setBodyTextColor === 'function') line.setBodyTextColor('#FFFFFF');
-                  if (typeof line.setBodyBackgroundColor === 'function') {
-                    line.setBodyBackgroundColor('#EF4444');
-                  }
-                  if (typeof line.setBodyBorderColor === 'function') {
-                    line.setBodyBorderColor('#EF4444');
-                  }
-                  if (self.lastAsk > 0 && typeof line.setPrice === 'function') {
-                    line.setPrice(self.lastAsk);
-                  }
-                } catch (_) {}
-                return line;
-              })
-              .catch(function () {
-                return null;
-              });
-
-            Promise.all([createBid, createAsk]).then(function () {
-              self.initializing = false;
-            });
-          },
-          update: function (bid, ask) {
-            if (Number.isFinite(bid) && bid > 0) this.lastBid = bid;
-            if (Number.isFinite(ask) && ask > 0) this.lastAsk = ask;
-
-            if (!this.bidLine || !this.askLine) {
-              this.init();
-            } else {
-              try {
-                if (this.bidLine && this.lastBid > 0 && typeof this.bidLine.setPrice === 'function') {
-                  this.bidLine.setPrice(this.lastBid);
-                }
-                if (this.askLine && this.lastAsk > 0 && typeof this.askLine.setPrice === 'function') {
-                  this.askLine.setPrice(this.lastAsk);
-                }
-              } catch (_) {}
-            }
-          },
-        };
-        window.__nativeBidAskLines = nativeBidAskLines;
 
         function ensureCountdownPatched() {
           try {
@@ -661,10 +563,6 @@
               });
             }
           });
-
-          if (window.__nativeBidAskLines) {
-            window.__nativeBidAskLines.update(spreadData.bid, spreadData.ask);
-          }
         }
 
         window.__chartBridge = {
@@ -3157,6 +3055,9 @@
             'display_market_status',
             'show_symbol_logo_in_legend',
             'show_symbol_logos',
+            'left_toolbar',
+            'timeframes_toolbar',
+            'control_bar',
           ],
           enabled_features: [
             'countdown',
@@ -3385,9 +3286,6 @@
           window.__tvBridgeReady = true;
           syncChartApiServerTime();
           triggerCountdownTick();
-          if (window.__nativeBidAskLines) {
-            window.__nativeBidAskLines.init();
-          }
           hideChartLegend();
           hideNativeTradingButtons();
           removeDefaultVolumeIndicator();
@@ -3538,17 +3436,6 @@
               chart.executeActionById('Trading.SellBuyButtonsToggleVisibility');
             }
           } catch (_) {}
-          // Keep the left drawing toolbar open by default.
-          try {
-            if (
-              chart &&
-              typeof chart.getCheckableActionState === 'function' &&
-              typeof chart.executeActionById === 'function' &&
-              !chart.getCheckableActionState('drawingToolbarAction')
-            ) {
-              chart.executeActionById('drawingToolbarAction');
-            }
-          } catch (_) {}
           activeResolution = chart.resolution();
 
           chart.onIntervalChanged().subscribe(null, function (interval) {
@@ -3558,9 +3445,6 @@
               updateBrokerOffset(lastBar.time, interval);
             }
             triggerCountdownTick();
-            if (window.__nativeBidAskLines) {
-              window.__nativeBidAskLines.init();
-            }
             postToNative({
               type: 'INTERVAL_CHANGED',
               payload: { resolution: interval },

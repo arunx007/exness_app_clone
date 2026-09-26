@@ -352,7 +352,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
               </View>
 
               <Text style={styles.balanceText} numberOfLines={1}>
-                {activeAccount.balance} USD :
+                {activeAccount.balance} USD
               </Text>
             </TouchableOpacity>
 
@@ -859,25 +859,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
     paddingVertical: 4,
+    gap: 4,
   },
   symbolSelectorBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     paddingVertical: 2,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
+    flexShrink: 0,
   },
   symbolSelectorText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#111827',
   },
   oneClickSwitchTrack: {
-    width: 48,
-    height: 26,
-    borderRadius: 13,
+    width: 42,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#E5E7EB',
     justifyContent: 'center',
     paddingHorizontal: 2,
@@ -888,9 +890,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   oneClickSwitchThumb: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -943,9 +945,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
     borderRadius: 18,
-    paddingVertical: 4,
-    paddingLeft: 6,
-    paddingRight: 10,
+    paddingVertical: 3.5,
+    paddingLeft: 5,
+    paddingRight: 8,
+    marginHorizontal: 2,
+    flexShrink: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -953,10 +957,10 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   demoChip: {
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: 10,
-    marginRight: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 5,
   },
   demoBg: {
     backgroundColor: '#E6F7EC',
@@ -965,7 +969,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8E1',
   },
   demoChipText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '600',
   },
   demoColor: {
@@ -975,16 +979,18 @@ const styles = StyleSheet.create({
     color: '#B45309',
   },
   balanceText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#111827',
   },
   headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
+    gap: 4,
   },
   headerIconBtn: {
-    padding: 6,
+    padding: 4,
     marginLeft: 2,
   },
   ordersSummaryBar: {

@@ -31,16 +31,7 @@ function AppFlow() {
     if (isLoading) return;
 
     if (isAuthenticated) {
-      // Auto login: valid token present
       setCurrentStep('MAIN_APP');
-    } else {
-      // Unauthenticated or token expired: kick out to LOGIN!
-      setCurrentStep((prev) => {
-        if (prev === 'MAIN_APP' || prev === 'SPLASH') {
-          return 'LOGIN';
-        }
-        return prev;
-      });
     }
   }, [isAuthenticated, isLoading]);
 
@@ -48,18 +39,14 @@ function AppFlow() {
     return (
       <SplashScreen
         onFinish={() => {
-          if (isAuthenticated) {
-            setCurrentStep('MAIN_APP');
-          } else {
-            setCurrentStep('LOGIN');
-          }
+          setCurrentStep('MAIN_APP');
         }}
       />
     );
   }
 
-  // Security Gate: Disallow access to MAIN_APP without authentication
-  if (!isAuthenticated) {
+  // Security Gate: Disallow access to MAIN_APP without authentication unless exploring demo
+  if (!isAuthenticated && currentStep !== 'MAIN_APP') {
     if (currentStep === 'WELCOME') {
       return (
         <WelcomeScreen
@@ -93,7 +80,7 @@ function AppFlow() {
     // Default unauthenticated view is strictly LOGIN
     return (
       <LoginScreen
-        onBack={() => setCurrentStep('LOGIN')}
+        onBack={() => setCurrentStep('MAIN_APP')}
         onSuccess={() => setCurrentStep('MAIN_APP')}
         onGoToRegister={() => setCurrentStep('REGISTER_EMAIL')}
       />
