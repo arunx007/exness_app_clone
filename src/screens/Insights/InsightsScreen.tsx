@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,88 +22,34 @@ import { useAccount } from '../../context/AccountContext';
 import { SwitchAccountModal, OpenAccountModal } from '../../components/modals';
 import { ChartScreen } from '../Chart/ChartScreen';
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
-import { marketSymbolsMatch } from '../../utils/symbol';
+import { marketSymbolsMatch, symbolDisplayName } from '../../utils/symbol';
+import { DEFAULT_CATALOG_SYMBOLS } from '../../constants/symbolsCatalog';
+import { mt5TradingService } from '../../api/mt5/tradingService';
+import { Mt5Symbol } from '../../api/mt5/types';
 import {
   economicCalendarService,
   EconomicEvent,
 } from '../../services/economicCalendarService';
 import {
-  TRADING_SIGNALS,
+  signalsService,
   TradingSignalItem,
 } from '../../services/signalsService';
 import {
-  TOP_NEWS_ARTICLES,
+  marketNewsService,
   MarketNewsArticle,
 } from '../../services/marketNewsService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface TopMoverDef {
+interface DynamicMoverItem {
   symbol: string;
-  querySymbol: string;
-  displayName: string;
-  fallbackPrice: number;
-  fallbackChange: number;
+  name: string;
+  bid: number;
+  ask: number;
+  changePercent: number;
   digits: number;
-  initialPoints: number[];
+  sparkline: number[];
 }
-
-const TOP_MOVERS_LIST: TopMoverDef[] = [
-  {
-    symbol: 'ETH/BTC',
-    querySymbol: 'ETHBTC',
-    displayName: 'ETH/BTC',
-    fallbackPrice: 0.03201,
-    fallbackChange: 0.04,
-    digits: 6,
-    initialPoints: [0.03198, 0.03195, 0.03202, 0.03204, 0.03201],
-  },
-  {
-    symbol: 'BTC',
-    querySymbol: 'BTCUSD',
-    displayName: 'BTC',
-    fallbackPrice: 84023.99,
-    fallbackChange: -0.07,
-    digits: 2,
-    initialPoints: [84080, 84050, 84010, 84040, 84023.99],
-  },
-  {
-    symbol: 'BTC/USDT',
-    querySymbol: 'BTCUSDT',
-    displayName: 'BTC/USDT',
-    fallbackPrice: 84028.99,
-    fallbackChange: -0.07,
-    digits: 2,
-    initialPoints: [84090, 84060, 84015, 84045, 84028.99],
-  },
-  {
-    symbol: 'XAU/USD',
-    querySymbol: 'XAUUSD',
-    displayName: 'XAU/USD',
-    fallbackPrice: 2654.8,
-    fallbackChange: 0.68,
-    digits: 2,
-    initialPoints: [2642, 2646, 2650, 2652, 2654.8],
-  },
-  {
-    symbol: 'USOIL',
-    querySymbol: 'USOIL',
-    displayName: 'USOIL',
-    fallbackPrice: 71.45,
-    fallbackChange: -1.25,
-    digits: 2,
-    initialPoints: [72.3, 72.0, 71.8, 71.6, 71.45],
-  },
-  {
-    symbol: 'ETH/USD',
-    querySymbol: 'ETHUSD',
-    displayName: 'ETH/USD',
-    fallbackPrice: 2685.5,
-    fallbackChange: 0.12,
-    digits: 2,
-    initialPoints: [2678, 2680, 2684, 2682, 2685.5],
-  },
-];
 
 export const InsightsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -114,45 +60,156 @@ export const InsightsScreen: React.FC = () => {
   const [showOpenAccount, setShowOpenAccount] = useState(false);
   const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | null>(null);
 
-  // Economic events & news state
+  // Dynamic state for all 4 sections
+  const [symbols, setSymbols] = useState<Mt5Symbol[]>([]);
+  const [isLoadingMovers, setIsLoadingMovers] = useState(true);
+
+  const [signals, setSignals] = useState<TradingSignalItem[]>([]);
+  const [isLoadingSignals, setIsLoadingSignals] = useState(true);
+
   const [events, setEvents] = useState<EconomicEvent[]>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+
+  const [news, setNews] = useState<MarketNewsArticle[]>([]);
+  const [isLoadingNews, setIsLoadingNews] = useState(true);
   const [selectedNews, setSelectedNews] = useState<MarketNewsArticle | null>(null);
 
-  // Subscribe to live top movers quotes via WebSocket
-  const moverSymbols = useMemo(
-    () => TOP_MOVERS_LIST.map((m) => m.querySymbol),
-    []
-  );
-  const liveMoverQuotes = useMarketQuotes(moverSymbols);
+  // Sparkline history ticks for live movers
+  const [sparklines, setSparklines] = useState<Record<string, number[]>>({});
 
-  const loadCalendarEvents = useCallback(async () => {
-    setIsLoadingEvents(true);
+  // 1. Fetch live symbols from MT5 / API dynamically
+  const loadSymbols = useCallback(async () => {
+    setIsLoadingMovers(true);
     try {
-      const data = await economicCalendarService.fetchEvents();
-      setEvents(data);
-    } catch {
-      // fallback handled in service
+      const liveSymbols = await mt5TradingService.getSymbols();
+      if (Array.isArray(liveSymbols) && liveSymbols.length > 0) {
+        setSymbols(liveSymbols);
+      }
+    } catch (e) {
+      console.warn('Failed to load MT5 symbols:', e);
     } finally {
-      setIsLoadingEvents(false);
-      setRefreshing(false);
+      setIsLoadingMovers(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadCalendarEvents();
-  }, [loadCalendarEvents]);
+  // 2. Fetch upcoming economic events dynamically
+  const loadEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    try {
+      const liveEvents = await economicCalendarService.fetchEvents();
+      setEvents(liveEvents);
+    } catch (e) {
+      console.warn('Failed to load calendar events:', e);
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  }, []);
 
-  const onRefresh = useCallback(() => {
+  // 3. Fetch top market news dynamically
+  const loadNews = useCallback(async () => {
+    setIsLoadingNews(true);
+    try {
+      const liveNews = await marketNewsService.fetchTopNews();
+      setNews(liveNews);
+    } catch (e) {
+      console.warn('Failed to load market news:', e);
+    } finally {
+      setIsLoadingNews(false);
+    }
+  }, []);
+
+  // Initial mount load
+  useEffect(() => {
+    void loadSymbols();
+    void loadEvents();
+    void loadNews();
+  }, [loadSymbols, loadEvents, loadNews]);
+
+  const isSignalsInitializedRef = useRef(false);
+
+  // Pull-to-refresh
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    loadCalendarEvents();
-  }, [loadCalendarEvents]);
+    isSignalsInitializedRef.current = false;
+    await Promise.all([loadSymbols(), loadEvents(), loadNews()]);
+    setRefreshing(false);
+  }, [loadSymbols, loadEvents, loadNews]);
+
+  // Dynamic Top Movers selection: prioritizes active instruments and sorts by absolute change
+  const topMoverSymbols = useMemo(() => {
+    const priority = ['ETHBTC', 'BTCUSD', 'BTCUSDT', 'XAUUSD', 'USOIL', 'EURUSD', 'ETHUSD', 'SOLUSD'];
+    if (symbols.length === 0) {
+      return priority;
+    }
+
+    const activeFromMeta = [...symbols]
+      .filter((s) => Boolean(s.symbol) && !s.symbol.includes('.'))
+      .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0))
+      .map((s) => s.symbol);
+
+    const combined = [...new Set([...priority, ...activeFromMeta])];
+    return combined.slice(0, 8);
+  }, [symbols]);
+
+  // Connect to live WebSocket quotes for top movers & active symbols
+  const allSubscribedSymbols = useMemo(() => {
+    const list = new Set<string>(topMoverSymbols);
+    list.add('BTCUSD');
+    list.add('ETHUSD');
+    list.add('XAUUSD');
+    list.add('USOIL');
+    list.add('EURUSD');
+    list.add('GBPUSD');
+    return Array.from(list);
+  }, [topMoverSymbols]);
+
+  const liveQuotes = useMarketQuotes(allSubscribedSymbols);
+
+  // Update sparklines dynamically as live WebSocket ticks arrive
+  useEffect(() => {
+    if (!liveQuotes || Object.keys(liveQuotes).length === 0) return;
+
+    setSparklines((prev) => {
+      let updated = false;
+      const next = { ...prev };
+
+      for (const [sym, quote] of Object.entries(liveQuotes)) {
+        if (!quote || quote.bid <= 0) continue;
+        const currentPoints = next[sym] || [];
+        const lastVal = currentPoints[currentPoints.length - 1];
+
+        if (lastVal !== quote.bid) {
+          const newPoints = [...currentPoints, quote.bid].slice(-10);
+          next[sym] = newPoints;
+          updated = true;
+        }
+      }
+
+      return updated ? next : prev;
+    });
+  }, [liveQuotes]);
+
+  // 4. Dynamically compute trading signals from live quotes without continuous spinner
+  useEffect(() => {
+    if (!isSignalsInitializedRef.current) {
+      setIsLoadingSignals(true);
+    }
+    signalsService
+      .fetchSignals(liveQuotes)
+      .then((sigList) => {
+        setSignals(sigList);
+        isSignalsInitializedRef.current = true;
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsLoadingSignals(false);
+      });
+  }, [liveQuotes]);
 
   // Render Impact indicator 3 bars
   const renderImpactBars = (impact: string) => {
     const isHigh = impact === 'High';
     const isMedium = impact === 'Medium';
-    const isLow = impact === 'Low';
     const isHoliday = impact === 'Holiday';
 
     if (isHoliday) {
@@ -250,76 +307,121 @@ export const InsightsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalMoversList}
-        >
-          {TOP_MOVERS_LIST.map((item, idx) => {
-            const live =
-              liveMoverQuotes[item.querySymbol] ??
-              Object.values(liveMoverQuotes).find((q) =>
-                marketSymbolsMatch(q.symbol, item.querySymbol)
+        {isLoadingMovers ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color="#F59E0B" />
+            <Text style={styles.loadingText}>Loading live movers…</Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalMoversList}
+          >
+            {topMoverSymbols.map((sym, idx) => {
+              const live =
+                liveQuotes[sym] ??
+                Object.values(liveQuotes).find((q) => marketSymbolsMatch(q.symbol, sym));
+
+              const symbolMeta = symbols.find((s) => marketSymbolsMatch(s.symbol, sym));
+              const defaultFallback = DEFAULT_CATALOG_SYMBOLS.find((d) =>
+                marketSymbolsMatch(d.symbol, sym)
               );
-            const price = live && live.bid > 0 ? live.bid : item.fallbackPrice;
-            const changePercent =
-              live?.changePercent !== undefined
-                ? live.changePercent
-                : item.fallbackChange;
-            const isPositive = changePercent >= 0;
-            const formattedPrice = price.toFixed(item.digits);
-            const formattedChange = `${isPositive ? '↑' : '↓'} ${Math.abs(
-              changePercent
-            ).toFixed(2)}%`;
+              const rawPrice =
+                live && live.bid > 0
+                  ? live.bid
+                  : symbolMeta && symbolMeta.bid > 0
+                  ? symbolMeta.bid
+                  : defaultFallback?.bid || 0;
+              const changePercent =
+                live?.changePercent !== undefined
+                  ? live.changePercent
+                  : symbolMeta?.changePercent !== undefined && symbolMeta.changePercent !== 0
+                  ? symbolMeta.changePercent
+                  : defaultFallback?.changePercent || 0;
+              const isPositive = changePercent >= 0;
 
-            // Sparkline points
-            const sparkPoints = isPositive
-              ? [price * 0.9992, price * 0.9988, price * 0.9996, price * 1.0002, price]
-              : [price * 1.0008, price * 1.0004, price * 0.9998, price * 0.9994, price];
+              const digits =
+                symbolMeta?.digits !== undefined && symbolMeta.digits > 0
+                  ? symbolMeta.digits
+                  : defaultFallback?.digits !== undefined
+                  ? defaultFallback.digits
+                  : rawPrice >= 1000
+                  ? 2
+                  : rawPrice >= 10
+                  ? 3
+                  : 5;
 
-            return (
-              <TouchableOpacity
-                key={idx}
-                activeOpacity={0.82}
-                style={styles.moverCard}
-                onPress={() => setSelectedChartSymbol(item.querySymbol)}
-              >
-                {/* Symbol Icon & Label */}
-                <View style={styles.moverTopRow}>
-                  <SymbolIcon symbol={item.querySymbol} size={28} />
-                  <Text style={styles.moverSymbolName} numberOfLines={1}>
-                    {item.displayName}
-                  </Text>
-                </View>
+              const formattedPrice = rawPrice > 0 ? rawPrice.toFixed(digits) : '---';
+              const formattedChange = `${isPositive ? '↑' : '↓'} ${Math.abs(
+                changePercent
+              ).toFixed(2)}%`;
 
-                {/* Sparkline chart with dashed baseline */}
-                <View style={styles.moverSparkline}>
-                  <SparklineChart
-                    points={sparkPoints}
-                    isPositive={isPositive}
-                    width={82}
-                    height={30}
-                  />
-                </View>
+              const displaySymbol =
+                sym === 'BTCUSD'
+                  ? 'BTC'
+                  : sym === 'ETHUSD'
+                  ? 'ETH'
+                  : sym === 'ETHBTC'
+                  ? 'ETH/BTC'
+                  : sym === 'BTCUSDT'
+                  ? 'BTC/USDT'
+                  : sym.includes('/')
+                  ? sym
+                  : sym.length === 6
+                  ? `${sym.slice(0, 3)}/${sym.slice(3)}`
+                  : sym;
 
-                {/* Big Price */}
-                <Text style={styles.moverPrice} numberOfLines={1}>
-                  {formattedPrice}
-                </Text>
+              // Dynamic sparkline points from live ticks
+              const sparkPoints =
+                sparklines[sym] && sparklines[sym].length >= 2
+                  ? sparklines[sym]
+                  : [rawPrice * 0.9995, rawPrice];
 
-                {/* Change % Text */}
-                <Text
-                  style={[
-                    styles.moverChangeText,
-                    { color: isPositive ? '#2563EB' : '#DC2626' },
-                  ]}
+              return (
+                <TouchableOpacity
+                  key={idx}
+                  activeOpacity={0.82}
+                  style={styles.moverCard}
+                  onPress={() => setSelectedChartSymbol(sym)}
                 >
-                  {formattedChange}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+                  {/* Symbol Icon & Label */}
+                  <View style={styles.moverTopRow}>
+                    <SymbolIcon symbol={sym} size={28} />
+                    <Text style={styles.moverSymbolName} numberOfLines={1}>
+                      {displaySymbol}
+                    </Text>
+                  </View>
+
+                  {/* Sparkline chart with dashed baseline */}
+                  <View style={styles.moverSparkline}>
+                    <SparklineChart
+                      points={sparkPoints}
+                      isPositive={isPositive}
+                      width={82}
+                      height={30}
+                    />
+                  </View>
+
+                  {/* Big Price */}
+                  <Text style={styles.moverPrice} numberOfLines={1}>
+                    {formattedPrice}
+                  </Text>
+
+                  {/* Change % Text */}
+                  <Text
+                    style={[
+                      styles.moverChangeText,
+                      { color: isPositive ? '#2563EB' : '#DC2626' },
+                    ]}
+                  >
+                    {formattedChange}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
 
         {/* SECTION 2: TRADING SIGNALS */}
         <View style={styles.sectionHeaderRow}>
@@ -329,19 +431,26 @@ export const InsightsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalMoversList}
-        >
-          {TRADING_SIGNALS.map((sig) => (
-            <SignalCard
-              key={sig.id}
-              signal={sig}
-              onPress={() => setSelectedChartSymbol(sig.symbol)}
-            />
-          ))}
-        </ScrollView>
+        {isLoadingSignals ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color="#F59E0B" />
+            <Text style={styles.loadingText}>Analyzing market signals…</Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalMoversList}
+          >
+            {signals.map((sig) => (
+              <SignalCard
+                key={sig.id}
+                signal={sig}
+                onPress={() => setSelectedChartSymbol(sig.symbol)}
+              />
+            ))}
+          </ScrollView>
+        )}
 
         {/* SECTION 3: UPCOMING EVENTS */}
         <View style={styles.sectionHeaderRow}>
@@ -356,6 +465,11 @@ export const InsightsScreen: React.FC = () => {
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#F59E0B" />
               <Text style={styles.loadingText}>Loading calendar events…</Text>
+            </View>
+          ) : events.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="calendar-outline" size={32} color="#9CA3AF" />
+              <Text style={styles.emptyText}>No upcoming events currently scheduled</Text>
             </View>
           ) : (
             events.slice(0, 5).map((ev, index) => {
@@ -400,61 +514,81 @@ export const InsightsScreen: React.FC = () => {
         </View>
 
         <View style={styles.eventsCardContainer}>
-          {TOP_NEWS_ARTICLES.map((article, index) => {
-            const isLast = index === TOP_NEWS_ARTICLES.length - 1;
-            return (
-              <TouchableOpacity
-                key={article.id}
-                activeOpacity={0.75}
-                style={[
-                  styles.newsItemRow,
-                  !isLast && styles.eventItemBorderBottom,
-                ]}
-                onPress={() => setSelectedNews(article)}
-              >
-                {/* News Thumbnail Image */}
-                <Image
-                  source={{ uri: article.imageUrl }}
-                  style={styles.newsThumbnail}
-                  resizeMode="cover"
-                />
+          {isLoadingNews ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#F59E0B" />
+              <Text style={styles.loadingText}>Loading market news…</Text>
+            </View>
+          ) : news.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="newspaper-outline" size={32} color="#9CA3AF" />
+              <Text style={styles.emptyText}>No market news available at the moment</Text>
+            </View>
+          ) : (
+            news.map((article, index) => {
+              const isLast = index === news.length - 1;
+              const liveQuote = article.symbolTag
+                ? liveQuotes[article.symbolTag] ??
+                  Object.values(liveQuotes).find((q) =>
+                    marketSymbolsMatch(q.symbol, article.symbolTag!)
+                  )
+                : undefined;
 
-                {/* News Right Column */}
-                <View style={styles.newsInfoCol}>
-                  <Text style={styles.newsTitle} numberOfLines={2}>
-                    {article.title}
-                  </Text>
+              const liveChange = liveQuote?.changePercent;
+              const isPositive = (liveChange ?? 0) >= 0;
 
-                  {/* Meta row: Symbol Tag + live change + time ago */}
-                  <View style={styles.newsMetaRow}>
-                    {article.symbolTag && (
-                      <View style={styles.newsSymbolPill}>
-                        <Text style={styles.newsSymbolText}>
-                          {article.symbolTag}
-                        </Text>
-                        {article.symbolChange && (
-                          <Text
-                            style={[
-                              styles.newsChangeText,
-                              {
-                                color: article.isPositive
-                                  ? '#2563EB'
-                                  : '#DC2626',
-                              },
-                            ]}
-                          >
-                            {article.isPositive ? '↑' : '↓'}{' '}
-                            {article.symbolChange}
+              return (
+                <TouchableOpacity
+                  key={article.id}
+                  activeOpacity={0.75}
+                  style={[
+                    styles.newsItemRow,
+                    !isLast && styles.eventItemBorderBottom,
+                  ]}
+                  onPress={() => setSelectedNews(article)}
+                >
+                  {/* News Thumbnail Image */}
+                  <Image
+                    source={{ uri: article.imageUrl }}
+                    style={styles.newsThumbnail}
+                    resizeMode="cover"
+                  />
+
+                  {/* News Right Column */}
+                  <View style={styles.newsInfoCol}>
+                    <Text style={styles.newsTitle} numberOfLines={2}>
+                      {article.title}
+                    </Text>
+
+                    {/* Meta row: Symbol Tag + live change from WebSocket + time ago */}
+                    <View style={styles.newsMetaRow}>
+                      {article.symbolTag && (
+                        <View style={styles.newsSymbolPill}>
+                          <Text style={styles.newsSymbolText}>
+                            {article.symbolTag}
                           </Text>
-                        )}
-                      </View>
-                    )}
-                    <Text style={styles.newsTimeAgo}>{article.timeAgo}</Text>
+                          {liveChange !== undefined && (
+                            <Text
+                              style={[
+                                styles.newsChangeText,
+                                {
+                                  color: isPositive ? '#2563EB' : '#DC2626',
+                                },
+                              ]}
+                            >
+                              {isPositive ? '↑' : '↓'}{' '}
+                              {Math.abs(liveChange).toFixed(2)}%
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                      <Text style={styles.newsTimeAgo}>{article.timeAgo}</Text>
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
       </ScrollView>
 
@@ -661,7 +795,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   loadingContainer: {
-    paddingVertical: 32,
+    paddingVertical: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -669,6 +803,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 13,
     color: '#6B7280',
+  },
+  emptyContainer: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#9CA3AF',
   },
   eventItemRow: {
     flexDirection: 'row',

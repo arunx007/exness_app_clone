@@ -86,126 +86,8 @@ export function formatEventRelativeTime(dateStr: string, timeStr?: string): stri
   return timeStr ? `${dateStr} ${timeStr}` : dateStr;
 }
 
-const FALLBACK_EVENTS: EconomicEvent[] = [
-  {
-    id: 1,
-    currency: 'IE',
-    country: 'IE',
-    eventDate: '2026-09-28',
-    eventTime: '10:00',
-    title: 'Consumer Confidence',
-    impact: 'Medium',
-    flag: '🇮🇪',
-    relativeTime: 'In 2 days',
-    actual: null,
-    forecast: '74.2',
-    previous: '72.9',
-  },
-  {
-    id: 2,
-    currency: 'JP',
-    country: 'JP',
-    eventDate: '2026-09-28',
-    eventTime: '00:50',
-    title: 'BoJ Monetary Policy Meeting Minutes',
-    impact: 'High',
-    flag: '🇯🇵',
-    relativeTime: 'In 2 days',
-    actual: null,
-    forecast: '',
-    previous: '',
-  },
-  {
-    id: 3,
-    currency: 'CZ',
-    country: 'CZ',
-    eventDate: '2026-09-28',
-    eventTime: '08:00',
-    title: 'St. Wenceslas Day',
-    impact: 'Holiday',
-    flag: '🇨🇿',
-    relativeTime: 'In 2 days',
-    actual: null,
-    forecast: '',
-    previous: '',
-  },
-  {
-    id: 4,
-    currency: 'USD',
-    country: 'US',
-    eventDate: '2026-09-26',
-    eventTime: '14:00',
-    title: 'FOMC Member Hammack Speaks',
-    impact: 'Medium',
-    flag: '🇺🇸',
-    relativeTime: 'Today at 14:00',
-    actual: null,
-    forecast: '',
-    previous: '',
-  },
-  {
-    id: 5,
-    currency: 'GBP',
-    country: 'GB',
-    eventDate: '2026-09-26',
-    eventTime: '09:15',
-    title: 'BOE Gov Bailey Speaks',
-    impact: 'High',
-    flag: '🇬🇧',
-    relativeTime: 'Today at 09:15',
-    actual: null,
-    forecast: '',
-    previous: '',
-  },
-];
-
 export const economicCalendarService = {
   async fetchEvents(): Promise<EconomicEvent[]> {
-    const defaultUpcoming: EconomicEvent[] = [
-      {
-        id: 'ev-ie-consumer',
-        currency: 'IE',
-        country: 'IE',
-        eventDate: '2026-09-28',
-        eventTime: '10:00',
-        title: 'Consumer Confidence',
-        impact: 'High',
-        flag: '🇮🇪',
-        relativeTime: 'In 2 days',
-        actual: null,
-        forecast: '74.2',
-        previous: '72.9',
-      },
-      {
-        id: 'ev-jp-boj',
-        currency: 'JP',
-        country: 'JP',
-        eventDate: '2026-09-28',
-        eventTime: '00:50',
-        title: 'BoJ Monetary Policy Meeting Mi...',
-        impact: 'High',
-        flag: '🇯🇵',
-        relativeTime: 'In 2 days',
-        actual: null,
-        forecast: '',
-        previous: '',
-      },
-      {
-        id: 'ev-cz-wenceslas',
-        currency: 'CZ',
-        country: 'CZ',
-        eventDate: '2026-09-28',
-        eventTime: '08:00',
-        title: 'St. Wenceslas Day',
-        impact: 'High',
-        flag: '🇨🇿',
-        relativeTime: 'In 2 days',
-        actual: null,
-        forecast: '',
-        previous: '',
-      },
-    ];
-
     try {
       const res = await fetch(DIRECT_URL, {
         method: 'POST',
@@ -215,40 +97,50 @@ export const economicCalendarService = {
         body: JSON.stringify({ api_key: DIRECT_KEY }),
       });
 
-      if (res.ok) {
-        const json = await res.json();
-        const rawEvents = json?.events || json?.data?.events || [];
-        if (Array.isArray(rawEvents) && rawEvents.length > 0) {
-          const apiMapped: EconomicEvent[] = rawEvents.slice(0, 15).map((ev: any, idx: number) => {
-            const countryCode = ev.source?.country || ev.country || ev.currency || 'USD';
-            const flag = getFlagForCountry(countryCode);
-            const relativeTime = formatEventRelativeTime(ev.eventDate, ev.eventTime);
-            return {
-              id: ev.id || `api-${idx}`,
-              currency: countryCode,
-              country: countryCode,
-              eventDate: ev.eventDate,
-              eventTime: ev.eventTime,
-              dateTimeIso: ev.dateTimeIso,
-              dateTimeUtc: ev.dateTimeUtc,
-              title: ev.title,
-              impact: ev.impact || 'Medium',
-              actual: ev.actual,
-              forecast: ev.forecast,
-              previous: ev.previous,
-              flag,
-              relativeTime,
-            };
-          });
+      if (!res.ok) {
+        throw new Error(`Economic API HTTP ${res.status}`);
+      }
 
-          // Prepend upcoming events to match exact user view
-          return [...defaultUpcoming, ...apiMapped];
-        }
+      const json = await res.json();
+      const rawEvents = json?.events || json?.data?.events || [];
+
+      if (Array.isArray(rawEvents) && rawEvents.length > 0) {
+        // Map and sort events
+        const mapped: EconomicEvent[] = rawEvents.map((ev: any, idx: number) => {
+          const countryCode = ev.source?.country || ev.country || ev.currency || 'USD';
+          const flag = getFlagForCountry(countryCode);
+          const relativeTime = formatEventRelativeTime(ev.eventDate, ev.eventTime);
+          return {
+            id: ev.id || `ev-${idx}`,
+            currency: countryCode,
+            country: countryCode,
+            eventDate: ev.eventDate,
+            eventTime: ev.eventTime,
+            dateTimeIso: ev.dateTimeIso,
+            dateTimeUtc: ev.dateTimeUtc,
+            title: ev.title,
+            impact: ev.impact || 'Medium',
+            actual: ev.actual,
+            forecast: ev.forecast,
+            previous: ev.previous,
+            flag,
+            relativeTime,
+          };
+        });
+
+        // Sort so that upcoming / newest events appear first
+        mapped.sort((a, b) => {
+          const dateA = new Date(`${a.eventDate}T${a.eventTime || '00:00'}:00`).getTime();
+          const dateB = new Date(`${b.eventDate}T${b.eventTime || '00:00'}:00`).getTime();
+          return dateB - dateA;
+        });
+
+        return mapped.slice(0, 20);
       }
     } catch (e) {
-      console.warn('economicCalendarService fetch failed, using fallback:', e);
+      console.warn('economicCalendarService.fetchEvents failed:', e);
     }
 
-    return [...defaultUpcoming, ...FALLBACK_EVENTS];
+    return [];
   },
 };
