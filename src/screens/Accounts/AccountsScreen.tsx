@@ -250,6 +250,43 @@ export const AccountsScreen: React.FC = () => {
     }));
   }, [orders]);
 
+const DEFAULT_CLOSED_ORDERS: ClosedOrder[] = [
+  {
+    id: 'cls-7730682',
+    symbol: 'XAUUSD',
+    type: 'Sell',
+    lot: 0.01,
+    openPrice: '4367.84',
+    closePrice: '4376.28',
+    openTime: '26 Sept 2026 09:12:15',
+    closeTime: '26 Sept 2026 09:35:40',
+    closedBy: 'User',
+    swap: '0.00 USD',
+    commission: '0.00 USD',
+    stopLoss: '—',
+    takeProfit: '—',
+    pnl: '-8.44',
+    isProfit: false,
+  },
+  {
+    id: 'cls-7730681',
+    symbol: 'BTCUSD',
+    type: 'Buy',
+    lot: 0.01,
+    openPrice: '79787.49',
+    closePrice: '79974.64',
+    openTime: '26 Sept 2026 06:20:10',
+    closeTime: '26 Sept 2026 07:45:22',
+    closedBy: 'User',
+    swap: '0.00 USD',
+    commission: '0.00 USD',
+    stopLoss: '—',
+    takeProfit: '—',
+    pnl: '+18.72',
+    isProfit: true,
+  },
+];
+
   const liveClosedOrders: ClosedOrder[] = useMemo(() => {
     if (history.length > 0) {
       return history.map((h) => {
@@ -273,7 +310,7 @@ export const AccountsScreen: React.FC = () => {
         };
       });
     }
-    return [];
+    return DEFAULT_CLOSED_ORDERS;
   }, [history]);
 
   const currentOpenOrders = liveOpenOrders;

@@ -104,13 +104,44 @@ const INITIAL_DEMO_POSITIONS: Mt5Position[] = [
   },
 ];
 
+const INITIAL_DEMO_HISTORY: Mt5HistoryDeal[] = [
+  {
+    ticket: 7730682,
+    symbol: 'XAUUSD',
+    type: 'SELL',
+    volume: 0.01,
+    price: 4376.28,
+    openPrice: 4367.84,
+    closePrice: 4376.28,
+    profit: -8.44,
+    swap: 0,
+    commission: 0,
+    time: new Date(Date.now() - 7200000).toISOString(),
+    action: 'User',
+  },
+  {
+    ticket: 7730681,
+    symbol: 'BTCUSD',
+    type: 'BUY',
+    volume: 0.01,
+    price: 79974.64,
+    openPrice: 79787.49,
+    closePrice: 79974.64,
+    profit: 18.72,
+    swap: 0,
+    commission: 0,
+    time: new Date(Date.now() - 18000000).toISOString(),
+    action: 'User',
+  },
+];
+
 const TradingDataContext = createContext<TradingDataContextType | undefined>(undefined);
 
 export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [profile, setProfile] = useState<Mt5Profile | null>(null);
   const [positions, setPositions] = useState<Mt5Position[]>(INITIAL_DEMO_POSITIONS);
   const [orders, setOrders] = useState<Mt5Order[]>([]);
-  const [history, setHistory] = useState<Mt5HistoryDeal[]>([]);
+  const [history, setHistory] = useState<Mt5HistoryDeal[]>(INITIAL_DEMO_HISTORY);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,12 +180,19 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsLoading(true);
     setError(null);
 
+    const historyRange = {
+      from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date().toISOString(),
+      page: 1,
+      pageSize: 100,
+    };
+
     try {
       const [nextProfile, nextPositions, nextOrders, nextHistory] = await Promise.all([
         mt5TradingService.getProfile().catch(() => null),
         mt5TradingService.getPositions().catch(() => []),
         mt5TradingService.getOrders().catch(() => []),
-        mt5TradingService.getHistory().catch(() => []),
+        mt5TradingService.getHistory(historyRange).catch(() => []),
       ]);
 
       if (nextProfile) setProfile(nextProfile);
@@ -165,7 +203,11 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (!ordersAuthoritative.current || nextOrders.length > 0) {
         setOrders(nextOrders);
       }
-      setHistory(nextHistory);
+      if (nextHistory && nextHistory.length > 0) {
+        setHistory(nextHistory);
+      } else {
+        setHistory(INITIAL_DEMO_HISTORY);
+      }
     } catch (err: unknown) {
       if (err instanceof ApiError && err.kind === 'cancelled') return;
       setError(toErrorMessage(err, 'Failed to load trading data'));
@@ -272,7 +314,7 @@ export const TradingDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         ordersAuthoritative.current = false;
         setPositions([]);
         setOrders([]);
-        setHistory([]);
+        setHistory(INITIAL_DEMO_HISTORY);
         setIsLoading(true);
       }
       fetchTradingData();
