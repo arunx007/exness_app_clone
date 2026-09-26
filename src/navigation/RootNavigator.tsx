@@ -13,6 +13,8 @@ import {
   ProfileTabIcon,
 } from '../components/common/TabIcons';
 
+import { useTheme } from '../theme';
+
 export type RootTabParamList = {
   Accounts: undefined;
   Trade: undefined;
@@ -24,21 +26,23 @@ export type RootTabParamList = {
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
 export const RootNavigator: React.FC = () => {
+  const { colors, isDark } = useTheme();
+
   return (
     <Tab.Navigator
       initialRouteName="Accounts"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopColor: '#F3F4F6',
+          backgroundColor: isDark ? '#121620' : '#FFFFFF',
+          borderTopColor: isDark ? '#1E2432' : '#F3F4F6',
           borderTopWidth: 1,
           height: 64,
           paddingBottom: 10,
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#111827',
-        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarActiveTintColor: isDark ? '#FFDE00' : '#111827',
+        tabBarInactiveTintColor: isDark ? '#6B7280' : '#9CA3AF',
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '500',

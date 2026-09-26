@@ -13,7 +13,7 @@ import { AccountProvider } from './src/context/AccountContext';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { TradingDataProvider } from './src/context/TradingDataContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 
 type AppStep = 'SPLASH' | 'WELCOME' | 'LOGIN' | 'REGISTER_EMAIL' | 'REGISTER_PASSWORD' | 'MAIN_APP';
@@ -116,7 +116,7 @@ function AppFlow() {
 
   // Authenticated: Render Main App
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={isDark ? DarkTheme : DefaultTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <RootNavigator />
     </NavigationContainer>

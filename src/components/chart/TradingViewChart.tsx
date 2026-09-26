@@ -23,6 +23,7 @@ import {
 } from './getTradingViewChartUri';
 import { normalizeMarketSymbol, marketSymbolsMatch } from '../../utils/symbol';
 import { DEFAULT_CATALOG_SYMBOLS } from '../../constants/symbolsCatalog';
+import { useTheme } from '../../theme';
 
 const DEFAULT_RESOLUTION = '5';
 
@@ -89,6 +90,8 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
   const initialResolutionRef = useRef(resolution);
 
+  const { isDark } = useTheme();
+
   // Construct chart URL (uses initial resolution so switching timeframe never forces a full reload)
   const chartUri = useMemo(
     () =>
@@ -96,11 +99,11 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         symbol: chartSymbol,
         tradingSymbol,
         interval: initialResolutionRef.current,
-        theme: 'light',
-        background: '#FFFFFF',
+        theme: isDark ? 'dark' : 'light',
+        background: isDark ? '#0B0E14' : '#FFFFFF',
         serverTimeOffset: chartSocket.getBrokerOffsetMs(),
       }),
-    [chartSymbol, tradingSymbol],
+    [chartSymbol, tradingSymbol, isDark],
   );
 
   // Synchronize open positions and pending orders for broker lines

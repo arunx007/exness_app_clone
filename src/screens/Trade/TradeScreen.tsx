@@ -31,6 +31,7 @@ import { mt5TradingService } from '../../api/mt5/tradingService';
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
 import { DEFAULT_CATALOG_SYMBOLS, CatalogSymbol } from '../../constants/symbolsCatalog';
 import { symbolDisplayName, marketSymbolsMatch } from '../../utils/symbol';
+import { useTheme } from '../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -61,6 +62,7 @@ function formatPrice(price: number, digits: number): string {
 
 export const TradeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
   const isFocused = useIsFocused();
 
@@ -301,7 +303,7 @@ export const TradeScreen: React.FC = () => {
         <TouchableOpacity
           key={item.id || item.symbol}
           activeOpacity={0.85}
-          style={styles.instrumentCard}
+          style={[styles.instrumentCard, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', borderBottomColor: isDark ? '#1E2432' : '#F3F4F6' }]}
           onPress={() => setSelectedChartSymbol(item.symbol)}
         >
           {/* Top row of card */}
@@ -313,7 +315,7 @@ export const TradeScreen: React.FC = () => {
               {/* Symbol & Subtitle */}
               <View style={styles.symbolInfo}>
                 <View style={styles.symbolHeaderRow}>
-                  <Text style={styles.symbolText}>
+                  <Text style={[styles.symbolText, { color: isDark ? '#FFFFFF' : '#111827' }]}>
                     {item.symbol.includes('.') ? item.symbol.split('.')[0] : item.symbol}
                   </Text>
                   {live && <View style={styles.liveIndicatorDot} />}
@@ -340,7 +342,7 @@ export const TradeScreen: React.FC = () => {
 
             {/* Right Column: Live Price & 24h Change */}
             <View style={styles.cardRight}>
-              <Text style={styles.priceText}>{formattedPrice}</Text>
+              <Text style={[styles.priceText, { color: isDark ? '#FFFFFF' : '#111827' }]}>{formattedPrice}</Text>
               <View style={styles.changeRow}>
                 <Text
                   style={[
@@ -384,14 +386,14 @@ export const TradeScreen: React.FC = () => {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View style={[styles.container, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', paddingTop: insets.top }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#0B0E14' : '#FFFFFF'} />
 
       {/* TOP BAR: Centered Account Badge & Right Clock Icon */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF' }]}>
         {/* Centered Account Selector Pill */}
         <TouchableOpacity
-          style={styles.accountPill}
+          style={[styles.accountPill, { backgroundColor: isDark ? '#161B26' : '#F3F4F6', borderColor: isDark ? '#282F3E' : '#E5E7EB' }]}
           activeOpacity={0.8}
           onPress={() => setShowSwitchAccount(true)}
         >
@@ -466,7 +468,7 @@ export const TradeScreen: React.FC = () => {
       )}
 
       {/* HORIZONTAL CATEGORY TABS & SEARCH ICON */}
-      <View style={styles.tabsContainer}>
+      <View style={[styles.tabsContainer, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', borderBottomColor: isDark ? '#1E2432' : '#F3F4F6' }]}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -484,12 +486,14 @@ export const TradeScreen: React.FC = () => {
                 <Text
                   style={[
                     styles.tabButtonText,
-                    isActive ? styles.tabTextActive : styles.tabTextInactive,
+                    isActive
+                      ? (isDark ? { color: '#FFFFFF', fontWeight: '700' } : styles.tabTextActive)
+                      : (isDark ? { color: '#6B7280', fontWeight: '500' } : styles.tabTextInactive),
                   ]}
                 >
                   {tab}
                 </Text>
-                {isActive && <View style={styles.tabIndicator} />}
+                {isActive && <View style={[styles.tabIndicator, { backgroundColor: isDark ? '#FFDE00' : '#111827' }]} />}
               </TouchableOpacity>
             );
           })}
@@ -504,7 +508,7 @@ export const TradeScreen: React.FC = () => {
           <Ionicons
             name={isSearchOpen ? 'close-outline' : 'search-outline'}
             size={22}
-            color="#111827"
+            color={isDark ? '#FFFFFF' : '#111827'}
           />
         </TouchableOpacity>
       </View>

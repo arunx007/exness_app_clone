@@ -20,7 +20,14 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const systemColorScheme = useColorScheme();
-  const [mode, setMode] = useState<ThemeMode>(systemColorScheme === 'light' ? 'light' : 'dark');
+  const [mode, setMode] = useState<ThemeMode>(systemColorScheme === 'dark' ? 'dark' : 'light');
+
+  // React to phone system theme changes automatically
+  React.useEffect(() => {
+    if (systemColorScheme === 'dark' || systemColorScheme === 'light') {
+      setMode(systemColorScheme);
+    }
+  }, [systemColorScheme]);
 
   const toggleTheme = () => {
     setMode((prev) => (prev === 'dark' ? 'light' : 'dark'));

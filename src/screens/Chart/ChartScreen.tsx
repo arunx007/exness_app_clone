@@ -31,8 +31,8 @@ import { TradingViewChart } from '../../components/chart/TradingViewChart';
 import { SymbolIcon } from '../../components/common/SymbolIcon';
 import { DEFAULT_CATALOG_SYMBOLS } from '../../constants/symbolsCatalog';
 import { marketSymbolsMatch } from '../../utils/symbol';
-
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
+import { useTheme } from '../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -50,6 +50,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   onSymbolChange,
 }) => {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
 
   // Dynamic instrument symbol state
@@ -344,29 +345,29 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
   }, []);
 
   return (
-    <View style={[styles.container, { paddingTop: orderExecutionModal.visible ? Math.max(insets.top, 8) : insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View style={[styles.container, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', paddingTop: orderExecutionModal.visible ? Math.max(insets.top, 8) : insets.top }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#0B0E14' : '#FFFFFF'} />
 
       {/* TOP PULL-DOWN HANDLE & HEADER: Hidden when sheet is open because of limited vertical space */}
       {!orderExecutionModal.visible && (
         <>
           <View style={styles.topHandleContainer}>
-            <View style={styles.topHandle} />
+            <View style={[styles.topHandle, { backgroundColor: isDark ? '#282F3E' : '#E5E7EB' }]} />
           </View>
 
           {/* HEADER BAR (Row 1): Dynamic Symbol | Account Capsule | One-Click switch & Close */}
-          <View style={styles.headerBar}>
+          <View style={[styles.headerBar, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF' }]}>
             {/* Left: Dynamic Symbol selector with Icon + Name + Chevron */}
             <TouchableOpacity
-              style={styles.symbolSelectorBtn}
+              style={[styles.symbolSelectorBtn, { backgroundColor: isDark ? '#161B26' : '#F9FAFB', borderColor: isDark ? '#282F3E' : '#E5E7EB' }]}
               activeOpacity={0.7}
               onPress={() => setShowSymbolPicker(true)}
             >
               <SymbolIcon symbol={currentSymbol} size={28} />
-              <Text style={styles.symbolSelectorText}>
+              <Text style={[styles.symbolSelectorText, { color: isDark ? '#FFFFFF' : '#111827' }]}>
                 {currentSymbol.includes('.') ? currentSymbol.split('.')[0] : currentSymbol}
               </Text>
-              <Ionicons name="chevron-down" size={14} color="#111827" style={{ marginLeft: 3 }} />
+              <Ionicons name="chevron-down" size={14} color={isDark ? '#FFFFFF' : '#111827'} style={{ marginLeft: 3 }} />
             </TouchableOpacity>
 
             {/* Center: Account Capsule */}
@@ -634,7 +635,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
 
       {/* BOTTOM TRADING ACTION BAR: Hidden when orderExecutionModal is open */}
       {!orderExecutionModal.visible && (
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.bottomBar, { backgroundColor: isDark ? '#121620' : '#FFFFFF', borderTopColor: isDark ? '#1E2432' : '#E5E7EB', paddingBottom: Math.max(insets.bottom, 12) }]}>
           {oneClickEnabled ? (
             /* Image 2: One-click ENABLED */
             <>
@@ -650,18 +651,18 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                 </TouchableOpacity>
 
                 {/* LOTS STEPPER CONTAINER (Center) */}
-                <View style={styles.lotStepperBox}>
+                <View style={[styles.lotStepperBox, { backgroundColor: isDark ? '#1E2330' : '#FFFFFF', borderColor: isDark ? '#282F3E' : '#E5E7EB' }]}>
                   <TouchableOpacity
                     style={styles.lotStepBtn}
                     onPress={() => adjustTradingLots(-0.01)}
                     activeOpacity={0.6}
                   >
-                    <Ionicons name="remove" size={16} color="#4B5563" />
+                    <Ionicons name="remove" size={16} color={isDark ? '#9CA3AF' : '#4B5563'} />
                   </TouchableOpacity>
 
                   <View style={styles.lotCenterCol}>
                     <Text style={styles.lotLabelSmall}>Lots</Text>
-                    <Text style={styles.lotValueBold}>{tradingLots.toFixed(2)}</Text>
+                    <Text style={[styles.lotValueBold, { color: isDark ? '#FFFFFF' : '#111827' }]}>{tradingLots.toFixed(2)}</Text>
                   </View>
 
                   <TouchableOpacity
@@ -669,7 +670,7 @@ export const ChartScreen: React.FC<ChartScreenProps> = ({
                     onPress={() => adjustTradingLots(0.01)}
                     activeOpacity={0.6}
                   >
-                    <Ionicons name="add" size={16} color="#4B5563" />
+                    <Ionicons name="add" size={16} color={isDark ? '#9CA3AF' : '#4B5563'} />
                   </TouchableOpacity>
                 </View>
 

@@ -24,6 +24,7 @@ import { ChartScreen } from '../Chart/ChartScreen';
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
 import { marketSymbolsMatch, symbolDisplayName } from '../../utils/symbol';
 import { DEFAULT_CATALOG_SYMBOLS } from '../../constants/symbolsCatalog';
+import { useTheme } from '../../theme';
 import { mt5TradingService } from '../../api/mt5/tradingService';
 import { Mt5Symbol } from '../../api/mt5/types';
 import {
@@ -53,6 +54,7 @@ interface DynamicMoverItem {
 
 export const InsightsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const { accounts, activeAccount, setActiveAccount, addAccount } = useAccount();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -240,13 +242,13 @@ export const InsightsScreen: React.FC = () => {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View style={[styles.container, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', paddingTop: insets.top }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#0B0E14' : '#FFFFFF'} />
 
       {/* TOP BAR: Centered Account Badge */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF' }]}>
         <TouchableOpacity
-          style={styles.accountPill}
+          style={[styles.accountPill, { backgroundColor: isDark ? '#161B26' : '#F3F4F6', borderColor: isDark ? '#282F3E' : '#E5E7EB' }]}
           activeOpacity={0.8}
           onPress={() => setShowSwitchAccount(true)}
         >

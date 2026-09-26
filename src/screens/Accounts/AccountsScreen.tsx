@@ -36,6 +36,7 @@ import { useTradingData } from '../../context/TradingDataContext';
 import { ChartScreen } from '../Chart/ChartScreen';
 import { useMarketQuotes } from '../../hooks/useMarketQuotes';
 import { marketSymbolsMatch } from '../../utils/symbol';
+import { useTheme } from '../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -87,6 +88,7 @@ const FIVE_QUICK_SYMBOLS: QuickSymbolDef[] = [
 
 export const AccountsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState<'Open' | 'Pending' | 'Closed'>('Open');
   const [showAccountDetails, setShowAccountDetails] = useState(false);
   const [closingOrder, setClosingOrder] = useState<PositionOrder | null>(null);
@@ -321,8 +323,8 @@ const DEFAULT_CLOSED_ORDERS: ClosedOrder[] = [
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View style={[styles.container, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF', paddingTop: insets.top }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#0B0E14' : '#FFFFFF'} />
 
       {/* Main Scroll View with stickyHeaderIndices for sticky tabs */}
       <ScrollView
@@ -331,15 +333,15 @@ const DEFAULT_CLOSED_ORDERS: ClosedOrder[] = [
         contentContainerStyle={{ paddingBottom: 40 }}
       >
         {/* TOP SECTION: Header with Accounts title, Clock, Bell, 3-dots */}
-        <View style={styles.topBar}>
-          <Text style={styles.screenTitle}>Accounts</Text>
+        <View style={[styles.topBar, { backgroundColor: isDark ? '#0B0E14' : '#FFFFFF' }]}>
+          <Text style={[styles.screenTitle, { color: isDark ? '#FFFFFF' : '#111827' }]}>Accounts</Text>
           <View style={styles.topActionsRow}>
             <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
-              <Ionicons name="time-outline" size={24} color="#111827" />
+              <Ionicons name="time-outline" size={24} color={isDark ? '#FFFFFF' : '#111827'} />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
-              <Ionicons name="notifications-outline" size={24} color="#111827" />
+              <Ionicons name="notifications-outline" size={24} color={isDark ? '#FFFFFF' : '#111827'} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -347,7 +349,7 @@ const DEFAULT_CLOSED_ORDERS: ClosedOrder[] = [
               activeOpacity={0.7}
               onPress={() => setShowThreeDotsMenu(true)}
             >
-              <Ionicons name="ellipsis-vertical" size={18} color="#111827" />
+              <Ionicons name="ellipsis-vertical" size={18} color={isDark ? '#FFFFFF' : '#111827'} />
             </TouchableOpacity>
           </View>
         </View>
